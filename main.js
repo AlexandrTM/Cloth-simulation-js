@@ -1,3 +1,36 @@
+function generateVertices(x, y, cellSize, vertices) {
+    for (let i = 0; i <= x; i++) {
+        for (let j = 0; j <= y; j++) {
+            const posX = i * cellSize;
+            const posY = j * cellSize;
+
+            // First triangle
+            vertices.push(
+                posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
+                posX + cellSize, 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
+
+                posX + cellSize, 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
+                posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
+
+                posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
+                posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
+            );
+
+            // Second triangle
+            vertices.push(
+                posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
+                posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
+
+                posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
+                posX           , 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
+
+                posX           , 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
+                posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
+            );
+        }
+    }
+}
+
 const init = async () => {
     const canvas = document.getElementById("canvas-container");
     const resizeCanvas = () => {
@@ -45,29 +78,14 @@ const init = async () => {
     });
 
     // setup vertices
-    const vertices = new Float32Array([
-        // first triangle
-        -1.0, 0.0, -1.0, 1, 0.5, 0.5, 0.5, 1,
-         1.0, 0.0, -1.0, 1, 0.5, 0.5, 0.5, 1,
-
-         1.0, 0.0, -1.0, 1, 0.5, 0.5, 0.5, 1,
-        -1.0, 0.0, 1.0, 1, 0.5, 0.5, 0.5, 1,
-
-        -1.0, 0.0,  1.0, 1, 0.5, 0.5, 0.5, 1,
-        -1.0, 0.0, -1.0, 1, 0.5, 0.5, 0.5, 1,
-        // second triangle
-        -1.0, 0.0,  1.0, 1, 0.5, 0.5, 0.5, 1,
-         1.0, 0.0, -1.0, 1, 0.5, 0.5, 0.5, 1,
-
-         1.0, 0.0, -1.0, 1, 0.5, 0.5, 0.5, 1,
-         1.0, 0.0, 1.0, 1, 0.5, 0.5, 0.5, 1,
-
-         1.0, 0.0, 1.0, 1, 0.5, 0.5, 0.5, 1,
-        -1.0, 0.0, 1.0, 1, 0.5, 0.5, 0.5, 1,
-    ]);
+    const vertices = [];
+    //console.log(vertices.length);
+    //console.log(vertices.byteLength);
+    generateVertices(10, 10, 0.17, vertices);
+    const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
 
     const vertexBuffer = device.createBuffer({
-        size: vertices.byteLength,
+        size: vertexBufferSize,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         mappedAtCreation: true,
     });
