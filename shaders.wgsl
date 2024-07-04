@@ -1,4 +1,3 @@
-
 struct Uniforms {
     modelViewProjection : mat4x4<f32>,
 };
