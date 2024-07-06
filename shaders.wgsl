@@ -2,12 +2,21 @@ struct Uniforms {
     modelViewProjection : mat4x4<f32>,
 };
 
+struct WireframeSettings {
+    width: f32,
+    color: vec4<f32>,
+};
+
 struct VertexOut {
     @builtin(position) position : vec4<f32>,
     @location(0) color : vec4<f32>,
-};  
+};
 
-@group(0) @binding(0) var<uniform> uniforms : Uniforms;
+@group(0) @binding(0) 
+var<uniform> uniforms : Uniforms;
+
+@group(0) @binding(1)
+var<uniform> wireframeSettings : WireframeSettings;
 
 @vertex
 fn vertex_main(@location(0) position: vec4<f32>,
@@ -20,6 +29,20 @@ fn vertex_main(@location(0) position: vec4<f32>,
 
 @fragment
 fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
-    return fragData.color;
-} 
-        
+    // Calculate partial derivatives of position
+    let ddx = dFdx(fragData.position);
+    let ddy = dFdy(fragData.position);
+    // Calculate the length of the gradient to detect edges
+    let edgeFactor = length(vec3(ddx.y * ddy.z - ddx.z * ddy.y,
+                                 ddx.z * ddy.x - ddx.x * ddy.z,
+                                 ddx.x * ddy.y - ddx.y * ddy.x));
+
+    // Edge threshold to determine wireframe
+    let edgeThreshold = 0.01; // Adjust this threshold as needed
+
+    if (edgeFactor > edgeThreshold) {
+        return wireframeSettings.color;  // Color the wireframe
+    } else {
+        return fragData.color;  // Color the triangle interior
+    }
+}
