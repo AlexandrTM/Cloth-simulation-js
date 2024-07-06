@@ -1,6 +1,6 @@
 function generateVertices(x, y, cellSize, vertices) {
-    for (let i = 0; i <= x; i++) {
-        for (let j = 0; j <= y; j++) {
+    for (let i = 0; i < x; i++) {
+        for (let j = 0; j < y; j++) {
             const posX = i * cellSize;
             const posY = j * cellSize;
 
@@ -8,24 +8,14 @@ function generateVertices(x, y, cellSize, vertices) {
             vertices.push(
                 posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
                 posX + cellSize, 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
-
-                posX + cellSize, 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
                 posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
-
-                posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
-                posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
             );
 
             // Second triangle
             vertices.push(
                 posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
                 posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
-
-                posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
                 posX           , 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
-
-                posX           , 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
-                posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
             );
         }
     }
@@ -37,22 +27,28 @@ function simulateCloth(vertices, clothWidth, clothHeight, gravity, time) {
             const index = (i * (clothHeight + 1) + j) * 8;
 
             // fixed cornerns
-            if ((i === 0 && j === 0) || (i === 0 && j === clothHeight) || (i === clothWidth && j === 0) || (i === clothWidth && j === clothHeight)) {
+            if(
+            (i === 0 && j === 0) || 
+            (i === 0 && j === clothHeight - 1) || 
+            (i === clothWidth - 1 && j === 0) || 
+            (i === clothWidth - 1 && j === clothHeight - 1)) {
                 continue;
             }
 
-            // sin center vertice movement
+            // center vertex sine wave movement
             if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothHeight / 2)) {
                 vertices[index + 1] = Math.sin(time) * 0.5;
                 continue;
             }
 
-            vertices[index + 1] += gravity * 0.016; // Apply gravity to the y-coordinate
+            //vertices[index + 1] += gravity * 0.016; // Apply gravity to the y-coordinate
         }
     }
 }
 
 const init = async () => {
+    // canvas resizing
+    // #region
     const canvas = document.getElementById("canvas-container");
     const resizeCanvas = () => {
         canvas.width = window.innerWidth;
@@ -61,6 +57,7 @@ const init = async () => {
 
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
+    // #endregion
 
     //  make sure we can initialize WebGPU
     // #region
@@ -103,24 +100,16 @@ const init = async () => {
     // #endregion
 
     // setup vertices
-    // #region
     const vertices = [];
-    //console.log(vertices.length);
-    //console.log(vertices.byteLength);
-    const clothWidth = 30;
-    const clothHeight = 30;
+    const clothWidth = 20;
+    const clothHeight = 20;
     const clothCellSize = 0.25;
+    // #region
 
     generateVertices(clothWidth, clothHeight, clothCellSize, vertices);
     const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
-
-    const vertexBuffer = device.createBuffer({
-        size: vertexBufferSize,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-    });
-    new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
-    vertexBuffer.unmap();
+    //console.log(vertices.length / 8);
+    //console.log(vertices.byteLength);
 
     const vertexBuffersDescriptors = [
         {
@@ -203,7 +192,7 @@ const init = async () => {
         ],
         },
         primitive: {
-        topology: "line-list",
+        topology: "triangle-list",
         },
     });
 
@@ -254,10 +243,22 @@ const init = async () => {
 
     // define render loop
     function frame() {
+        time += 0.016;
+
+        simulateCloth(vertices, clothWidth, clothHeight, gravity, time);
+
         glMatrix.mat4.multiply(modelViewProjectionMatrix, viewMatrix, modelMatrix);
         glMatrix.mat4.multiply(modelViewProjectionMatrix, projectionMatrix, modelViewProjectionMatrix);
         
         device.queue.writeBuffer(uniformBuffer, 0, modelViewProjectionMatrix);
+
+        const vertexBuffer = device.createBuffer({
+            size: vertexBufferSize,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+            mappedAtCreation: true,
+        });
+        new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
+            vertexBuffer.unmap();
 
         renderPassDescriptor.colorAttachments[0].view = context
         .getCurrentTexture()
