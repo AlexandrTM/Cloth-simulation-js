@@ -1,43 +1,41 @@
-function generateVertices(x, y, cellSize, vertices) {
-    for (let i = 0; i < x; i++) {
-        for (let j = 0; j < y; j++) {
+function generateVertices(width, height, cellSize, vertices, indices) {
+    for (let i = 0; i < width; i++) {
+        for (let j = 0; j < height; j++) {
             const posX = i * cellSize;
-            const posY = j * cellSize;
+            const posZ = j * cellSize;
 
-            // First triangle
-            vertices.push(
-                posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
-                posX + cellSize, 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
-                posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
-            );
+            vertices.push(posX, 0.0, posZ, 1, 0.5, 0.5, 0.5, 1);
 
-            // Second triangle
-            vertices.push(
-                posX           , 0.0, posY           , 1, 0.5, 0.5, 0.5, 1,
-                posX + cellSize, 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
-                posX           , 0.0, posY + cellSize, 1, 0.5, 0.5, 0.5, 1,
-            );
+            const bottomLeft  = i * (height) + j;
+            const bottomRight = bottomLeft + 1;
+            const topLeft     = bottomLeft + (height);
+            const topRight    = topLeft + 1;
+
+            // first triangle
+            indices.push(bottomLeft, bottomRight, topRight);
+            // second triangle
+            indices.push(bottomLeft, topRight, topLeft);
         }
     }
 }
 
 function simulateCloth(vertices, clothWidth, clothHeight, gravity, time) {
-    for (let i = 0; i <= clothWidth; i++) {
-        for (let j = 0; j <= clothHeight; j++) {
-            const index = (i * (clothHeight + 1) + j) * 8;
+    for (let i = 0; i < clothWidth; i++) {
+        for (let j = 0; j < clothHeight; j++) {
+            const index = (i * (clothHeight) + j) * 8;
 
             // fixed cornerns
             if(
-            (i === 0 && j === 0) || 
-            (i === 0 && j === clothHeight - 1) || 
-            (i === clothWidth - 1 && j === 0) || 
+            (i === 0              && j === 0              ) || 
+            (i === 0              && j === clothHeight - 1) || 
+            (i === clothWidth - 1 && j === 0              ) || 
             (i === clothWidth - 1 && j === clothHeight - 1)) {
                 continue;
             }
 
             // center vertex sine wave movement
             if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothHeight / 2)) {
-                vertices[index + 1] = Math.sin(time) * 0.5;
+                vertices[index + 1] = Math.sin(time) * 10.5;
                 continue;
             }
 
@@ -101,14 +99,17 @@ const init = async () => {
 
     // setup vertices
     const vertices = [];
-    const clothWidth = 20;
-    const clothHeight = 20;
+    const indices = [];
+    const clothWidth = 10;
+    const clothHeight = 10;
     const clothCellSize = 0.25;
     // #region
 
-    generateVertices(clothWidth, clothHeight, clothCellSize, vertices);
+    generateVertices(clothWidth, clothHeight, clothCellSize, vertices, indices);
     const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
-    //console.log(vertices.length / 8);
+    const indexBufferSize = indices.length * Uint32Array.BYTES_PER_ELEMENT;
+    console.log(vertices.length / 8);
+    console.log(indices.length);
     //console.log(vertices.byteLength);
 
     const vertexBuffersDescriptors = [
@@ -252,17 +253,26 @@ const init = async () => {
         
         device.queue.writeBuffer(uniformBuffer, 0, modelViewProjectionMatrix);
 
+        // setup vertex and index buffers
+        // #region
         const vertexBuffer = device.createBuffer({
             size: vertexBufferSize,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
             mappedAtCreation: true,
         });
         new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
-            vertexBuffer.unmap();
+        vertexBuffer.unmap();
+        const indexBuffer = device.createBuffer({
+            size: indexBufferSize,
+            usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+            mappedAtCreation: true,
+        });
+        new Uint32Array(indexBuffer.getMappedRange()).set(indices);
+        indexBuffer.unmap();
+        // #endregion
 
         renderPassDescriptor.colorAttachments[0].view = context
-        .getCurrentTexture()
-        .createView();
+        .getCurrentTexture().createView();
         
         const commandEncoder = device.createCommandEncoder();
         const passEncoder =
@@ -271,7 +281,8 @@ const init = async () => {
         passEncoder.setPipeline(pipeline);
         passEncoder.setBindGroup(0, uniformBindGroup);
         passEncoder.setVertexBuffer(0, vertexBuffer);
-        passEncoder.draw(vertices.length / 8);
+        passEncoder.setIndexBuffer(indexBuffer, "uint32");
+        passEncoder.drawIndexed(indices.length, 1, 0, 0, 0);
         passEncoder.end();
 
         device.queue.submit([commandEncoder.finish()]);
