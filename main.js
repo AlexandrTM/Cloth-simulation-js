@@ -31,6 +31,27 @@ function generateVertices(x, y, cellSize, vertices) {
     }
 }
 
+function simulateCloth(vertices, clothWidth, clothHeight, gravity, time) {
+    for (let i = 0; i <= clothWidth; i++) {
+        for (let j = 0; j <= clothHeight; j++) {
+            const index = (i * (clothHeight + 1) + j) * 8;
+
+            // fixed cornerns
+            if ((i === 0 && j === 0) || (i === 0 && j === clothHeight) || (i === clothWidth && j === 0) || (i === clothWidth && j === clothHeight)) {
+                continue;
+            }
+
+            // sin center vertice movement
+            if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothHeight / 2)) {
+                vertices[index + 1] = Math.sin(time) * 0.5;
+                continue;
+            }
+
+            vertices[index + 1] += gravity * 0.016; // Apply gravity to the y-coordinate
+        }
+    }
+}
+
 const init = async () => {
     const canvas = document.getElementById("canvas-container");
     const resizeCanvas = () => {
@@ -42,6 +63,7 @@ const init = async () => {
     resizeCanvas();
 
     //  make sure we can initialize WebGPU
+    // #region
     if (!navigator.gpu) {
         console.error("WebGPU cannot be initialized - navigator.gpu not found");
         return null;
@@ -62,8 +84,10 @@ const init = async () => {
         console.error("WebGPU cannot be initialized - Canvas does not support WebGPU");
         return null;
     }
+    // #endregion
 
     // configure swap chain
+    // #region
     const devicePixelRatio = window.devicePixelRatio || 1;
     const presentationSize = [
         canvas.clientWidth * devicePixelRatio,
@@ -76,12 +100,18 @@ const init = async () => {
         format: presentationFormat,
         size: presentationSize,
     });
+    // #endregion
 
     // setup vertices
+    // #region
     const vertices = [];
     //console.log(vertices.length);
     //console.log(vertices.byteLength);
-    generateVertices(10, 10, 0.17, vertices);
+    const clothWidth = 30;
+    const clothHeight = 30;
+    const clothCellSize = 0.25;
+
+    generateVertices(clothWidth, clothHeight, clothCellSize, vertices);
     const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
 
     const vertexBuffer = device.createBuffer({
@@ -110,6 +140,7 @@ const init = async () => {
         stepMode: "vertex",
         },
     ];
+    // #endregion
 
     // load shaders
     const shaderModule = device.createShaderModule({
@@ -176,13 +207,19 @@ const init = async () => {
         },
     });
 
+    // setup MVP matrix and uniform buffer
+    // #region
     const modelMatrix = glMatrix.mat4.create();
     const viewMatrix = glMatrix.mat4.create();
     const projectionMatrix = glMatrix.mat4.create();
     const modelViewProjectionMatrix = glMatrix.mat4.create();
 
-    glMatrix.mat4.lookAt(viewMatrix, [4, 4, 4], [0, 0, 0], [0, 1, 0]);
-    glMatrix.mat4.perspective(projectionMatrix, Math.PI / 4, canvas.clientWidth / canvas.clientHeight, 0.1, 100.0);
+    glMatrix.mat4.lookAt(viewMatrix, 
+        [clothHeight * clothCellSize * 2.15, clothHeight * clothCellSize * 1.9, clothHeight * clothCellSize * 2.15], 
+        [0, 0, 0], 
+        [0, 1, 0]
+    );
+    glMatrix.mat4.perspective(projectionMatrix, Math.PI / 4, canvas.clientWidth / canvas.clientHeight, 0.1, 10000);
 
     const uniformBuffer = device.createBuffer({
         size: modelViewProjectionMatrix.byteLength,
@@ -198,6 +235,7 @@ const init = async () => {
         },
         },],
     });
+    // #endregion
 
     // create render pass descriptor
     const renderPassDescriptor = {
@@ -210,6 +248,9 @@ const init = async () => {
         },
         ],
     };
+
+    let time = 0;
+    const gravity = -9.8;
 
     // define render loop
     function frame() {
