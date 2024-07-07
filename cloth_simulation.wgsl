@@ -1,3 +1,15 @@
+struct Vertex {
+    position : vec3<f32>,
+    invMass : f32,
+    predictedPosition : vec3<f32>,
+};
+
+struct DistanceConstraint {
+    vertex1 : u32,
+    vertex2 : u32,
+    restLength : f32,
+};
+
 struct VertexBuffer {
     vertices : array<Vertex>,
 };
@@ -7,7 +19,7 @@ struct DistanceConstraintsBuffer {
 };
 
 @group(0) @binding(0)
-var<storage, read_write> verticesBuffer : VertexBuffer;
+var<storage, read_write> vertexBuffer : VertexBuffer;
 
 @group(0) @binding(1)
 var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
@@ -23,15 +35,18 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     var newPosition : vec3<f32> = vertex.position;
 
     // 2. Apply distance constraints
-    for (var i = 0u; i < distanceConstraintsBuffer.constraints.length(); i = i + 1u) {
+    for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
         let constraint = distanceConstraintsBuffer.constraints[i];
         
         if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
             // Resolve indices
-            let otherIndex = vertexIndex == constraint.vertex1 ? constraint.vertex2 : constraint.vertex1;
+            var otherIndex = constraint.vertex2;
+            if (vertexIndex == constraint.vertex2) {
+                otherIndex = constraint.vertex1;
+            }
 
             // Calculate correction based on current positions
-            let delta = verticesBuffer.vertices[otherIndex].position - vertex.position;
+            let delta = vertexBuffer.vertices[otherIndex].position - vertex.position;
             let currentDistance = length(delta);
             let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
             

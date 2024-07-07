@@ -26,6 +26,25 @@ function generateVertices(width, length, cellSize, vertices, indices) {
     //console.log(Math.max( ...indices ));
 }
 
+function generateDistanceConstraints(width, length) {
+    const constraints = [];
+    const restLength = 1.0; // adjust based on the spacing between vertices
+
+    for (let i = 0; i < width; i++) {
+        for (let j = 0; j < length; j++) {
+            const index = i * length + j;
+            if (i < width - 1) {
+                constraints.push({ vertex1: index, vertex2: index + length, restLength });
+            }
+            if (j < length - 1) {
+                constraints.push({ vertex1: index, vertex2: index + 1, restLength });
+            }
+        }
+    }
+
+    return constraints;
+}
+
 // function simulateCloth(vertices, clothWidth, clothLength, gravity, time) {
 //     for (let i = 0; i < clothWidth; i++) {
 //         for (let j = 0; j < clothLength; j++) {
@@ -58,6 +77,7 @@ const init = async () => {
     const clothLength = 10;
     const clothCellSize = 1.0;
 
+    const constraints = generateDistanceConstraints(clothWidth, clothLength);
     let distanceConstraints = [];
 
     let time = 0;
@@ -153,6 +173,7 @@ const init = async () => {
     });
     new Uint32Array(indexBuffer.getMappedRange()).set(indices);
     indexBuffer.unmap();
+
     const vertexBuffer = device.createBuffer({
         size: vertexBufferSize,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
@@ -361,6 +382,14 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     // compute pipeline
     // #region
     // initialize distance constraints
+    for (let i = 0; i < constraints.length; i++) {
+        const constraint = constraints[i];
+        const baseIndex = i * 3;
+        distanceConstraints[baseIndex] = constraint.vertex1;
+        distanceConstraints[baseIndex + 1] = constraint.vertex2;
+        distanceConstraints[baseIndex + 2] = constraint.restLength;
+    }
+
     let distanceConstraintsBuffer = device.createBuffer({
         size: distanceConstraints.length * Float32Array.BYTES_PER_ELEMENT * 3, // each distance constraint has 3 floats (vertex1, vertex2, restLength)
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
@@ -368,6 +397,18 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
 
     const computeShaderModule = device.createShaderModule({
         code: `
+struct Vertex {
+    position : vec3<f32>,
+    invMass : f32,
+    predictedPosition : vec3<f32>,
+};
+
+struct DistanceConstraint {
+    vertex1 : u32,
+    vertex2 : u32,
+    restLength : f32,
+};
+
 struct VertexBuffer {
     vertices : array<Vertex>,
 };
@@ -377,7 +418,7 @@ struct DistanceConstraintsBuffer {
 };
 
 @group(0) @binding(0)
-var<storage, read_write> verticesBuffer : VertexBuffer;
+var<storage, read_write> vertexBuffer : VertexBuffer;
 
 @group(0) @binding(1)
 var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
@@ -393,15 +434,18 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     var newPosition : vec3<f32> = vertex.position;
 
     // 2. Apply distance constraints
-    for (var i = 0u; i < distanceConstraintsBuffer.constraints.length(); i = i + 1u) {
+    for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
         let constraint = distanceConstraintsBuffer.constraints[i];
         
         if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
             // Resolve indices
-            let otherIndex = vertexIndex == constraint.vertex1 ? constraint.vertex2 : constraint.vertex1;
+            var otherIndex = constraint.vertex2;
+            if (vertexIndex == constraint.vertex2) {
+                otherIndex = constraint.vertex1;
+            }
 
             // Calculate correction based on current positions
-            let delta = verticesBuffer.vertices[otherIndex].position - vertex.position;
+            let delta = vertexBuffer.vertices[otherIndex].position - vertex.position;
             let currentDistance = length(delta);
             let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
             
@@ -427,7 +471,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             {
                 binding: 1,
                 visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: 'storage', },
+                buffer: { type: 'read-only-storage', },
             },
         ]})]
     });
@@ -461,21 +505,16 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
         //simulateCloth(vertices, clothWidth, clothLength, gravity, time);
         const dispatchSize = Math.ceil(vertices.length / 64); // Adjust workgroup size as needed
-
-        const commandEncoder = device.createCommandEncoder();
-        const computePassEncoder = commandEncoder.beginComputePass();
+        const computeCommandEncoder = device.createCommandEncoder();
+        const computePassEncoder = computeCommandEncoder.beginComputePass();
         computePassEncoder.setPipeline(computePipeline);
         computePassEncoder.setBindGroup(0, computeBindGroup);
         computePassEncoder.dispatchWorkgroups(dispatchSize);
         computePassEncoder.end();
-
-        device.queue.submit([commandEncoder.finish()]);
-
-
+        device.queue.submit([computeCommandEncoder.finish()]);
 
         glMatrix.mat4.multiply(modelViewProjectionMatrix, viewMatrix, modelMatrix);
         glMatrix.mat4.multiply(modelViewProjectionMatrix, projectionMatrix, modelViewProjectionMatrix);
-        
         device.queue.writeBuffer(MVP_uniform_buffer, 0, modelViewProjectionMatrix);
         
         // update vertex buffer
@@ -491,21 +530,19 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
         renderPassDescriptor.colorAttachments[0].view = context
         .getCurrentTexture().createView();
-        
+
+        const commandEncoder = device.createCommandEncoder();
         const passEncoder =
         commandEncoder.beginRenderPass(renderPassDescriptor);
-
         passEncoder.setPipeline(pipeline);
         passEncoder.setBindGroup(0, uniformBindGroup);
         passEncoder.setVertexBuffer(0, vertexBuffer);
         passEncoder.setIndexBuffer(indexBuffer, "uint32");
         passEncoder.drawIndexed(indices.length, 1, 0, 0, 0);
         passEncoder.end();
-
         device.queue.submit([commandEncoder.finish()]);
         requestAnimationFrame(frame);
     }
-
     requestAnimationFrame(frame);
 };
 
