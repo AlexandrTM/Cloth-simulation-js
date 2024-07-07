@@ -35,7 +35,7 @@ function simulateCloth(vertices, clothWidth, clothHeight, gravity, time) {
 
             // center vertex sine wave movement
             if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothHeight / 2)) {
-                vertices[index + 1] = Math.sin(time) * 2.5;
+                vertices[index + 1] = Math.sin(time) * 1.0;
                 continue;
             }
 
@@ -44,7 +44,16 @@ function simulateCloth(vertices, clothWidth, clothHeight, gravity, time) {
     }
 }
 
-const init = async () => {
+const init = async () => { 
+    const vertices = [];
+    const indices = [];
+    const clothWidth = 5;
+    const clothHeight = 5;
+    const clothCellSize = 0.25;
+
+    let time = 0;
+    const gravity = -9.8;
+
     // canvas resizing
     // #region
     const canvas = document.getElementById("canvas-container");
@@ -57,7 +66,7 @@ const init = async () => {
     resizeCanvas();
     // #endregion
 
-    //  make sure we can initialize WebGPU
+    // make sure we can initialize WebGPU
     // #region
     if (!navigator.gpu) {
         console.error("WebGPU cannot be initialized - navigator.gpu not found");
@@ -97,14 +106,8 @@ const init = async () => {
     });
     // #endregion
 
-    // setup vertices
-    const vertices = [];
-    const indices = [];
-    const clothWidth = 10;
-    const clothHeight = 10;
-    const clothCellSize = 0.25;
+    // create vertices
     // #region
-
     generateVertices(clothWidth, clothHeight, clothCellSize, vertices, indices);
     const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
     const indexBufferSize = indices.length * Uint32Array.BYTES_PER_ELEMENT;
@@ -130,7 +133,22 @@ const init = async () => {
         stepMode: "vertex",
         },
     ];
-    // #endregion
+
+    const indexBuffer = device.createBuffer({
+        size: indexBufferSize,
+        usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+        mappedAtCreation: true,
+    });
+    new Uint32Array(indexBuffer.getMappedRange()).set(indices);
+    indexBuffer.unmap();
+    const vertexBuffer = device.createBuffer({
+        size: vertexBufferSize,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+        mappedAtCreation: true,
+    });
+    new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
+    vertexBuffer.unmap();
+    // #endregion 
 
     // load shaders
     const shaderModule = device.createShaderModule({
@@ -164,36 +182,61 @@ fn vertex_main(@location(0) position: vec4<f32>,
     return output;
 } 
 
+fn edgeFactor(bary: vec3f) -> f32 {
+  let d = fwidth(bary);
+  let a3 = smoothstep(vec3f(0.0), d * wireframeSettings.width, bary);
+  return min(min(a3.x, a3.y), a3.z);
+}
+
 @fragment
 fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     // Calculate partial derivatives of position
-    let ddx = vec3(
-        fragData.position.x + 1.0 - fragData.position.x,
-        fragData.position.y + 1.0 - fragData.position.y,
-        fragData.position.z + 1.0 - fragData.position.z
-    );
+    let ddx = dpdx(fragData.position.xy);
+    let ddy = dpdy(fragData.position.xy);
     
-    let ddy = vec3(
-        fragData.position.x + 1.0 - fragData.position.x,
-        fragData.position.y + 1.0 - fragData.position.y,
-        fragData.position.z + 1.0 - fragData.position.z
-    );
-    // Calculate the length of the gradient to detect edges
-    let edgeFactor = length(vec3(ddx.y * ddy.z - ddx.z * ddy.y,
-                                 ddx.z * ddy.x - ddx.x * ddy.z,
-                                 ddx.x * ddy.y - ddx.y * ddy.x));
+    // Calculate the determinant to find edge presence
+    let edgeFactor = abs(ddx.x * ddy.y - ddx.y * ddy.x);
 
     // Edge threshold to determine wireframe
-    let edgeThreshold = 0.1; // Adjust this threshold as needed
+    let edgeThreshold = 1.0; // Adjust this threshold as needed
 
-    //if (edgeFactor > edgeThreshold) {
-    //    return wireframeSettings.color;  // Color the wireframe
-    //} else {
-        return wireframeSettings.color;  // Color the triangle interior
-    //}
+    if (edgeFactor < edgeThreshold) {
+        return wireframeSettings.color;  // Color the wireframe
+    } else {
+        return fragData.color;  // Color the triangle interior
+    }
 }
         `,
     });
+
+    // create MVP matrix and uniform buffers
+    // #region
+    const modelMatrix = glMatrix.mat4.create();
+    const viewMatrix = glMatrix.mat4.create();
+    const projectionMatrix = glMatrix.mat4.create();
+    const modelViewProjectionMatrix = glMatrix.mat4.create();
+
+    glMatrix.mat4.lookAt(viewMatrix, 
+        [clothHeight * clothCellSize * 2.15, clothHeight * clothCellSize * 1.9, clothHeight * clothCellSize * 2.15], 
+        [0, 0, 0], 
+        [0, 1, 0]
+    );
+    glMatrix.mat4.perspective(projectionMatrix, Math.PI / 4, canvas.clientWidth / canvas.clientHeight, 0.1, 10000);
+
+    const wireframeSettings = {
+        width: 1.0,
+        color: [0.0, 0.0, 0.0, 1.0]
+    };
+
+    const MVP_uniform_buffer = device.createBuffer({
+        size: modelViewProjectionMatrix.byteLength,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const wireframe_uniform_buffer = device.createBuffer({
+        size: Math.ceil(Float32Array.BYTES_PER_ELEMENT * (1 + wireframeSettings.color.length) / 16) * 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    // #endregion
 
     // create pipeline layout
     const pipelineLayout = device.createPipelineLayout({
@@ -212,6 +255,20 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
                 buffer: {
                     type: 'uniform',
                 },
+            },
+            { 
+                binding: 2, 
+                visibility: GPUShaderStage.VERTEX, 
+                buffer: { 
+                    type: 'read-only-storage' 
+                } 
+            },
+            { 
+                binding: 3, 
+                visibility: GPUShaderStage.FRAGMENT, 
+                buffer: { 
+                    type: 'read-only-storage' 
+                } 
             },
         ],
         })],
@@ -239,54 +296,30 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         },
     });
 
-    // setup MVP matrix and uniform buffers
-    // #region
-    const modelMatrix = glMatrix.mat4.create();
-    const viewMatrix = glMatrix.mat4.create();
-    const projectionMatrix = glMatrix.mat4.create();
-    const modelViewProjectionMatrix = glMatrix.mat4.create();
-
-    glMatrix.mat4.lookAt(viewMatrix, 
-        [clothHeight * clothCellSize * 2.15, clothHeight * clothCellSize * 1.9, clothHeight * clothCellSize * 2.15], 
-        [0, 0, 0], 
-        [0, 1, 0]
-    );
-    glMatrix.mat4.perspective(projectionMatrix, Math.PI / 4, canvas.clientWidth / canvas.clientHeight, 0.1, 10000);
-
-    const wireframeSettings = {
-        width: 1.0,
-        color: [0.0, 0.0, 0.0, 1.0]
-    };
-
-    const MVP_uniform_buffer = device.createBuffer({
-        size: modelViewProjectionMatrix.byteLength,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    const wireframe_uniform_buffer = device.createBuffer({
-        size: Math.ceil(Float32Array.BYTES_PER_ELEMENT * (1 + wireframeSettings.color.length) / 16) * 16,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
+    // create bind group
     const uniformBindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
         {
             binding: 0,
-            resource: {
-                buffer: MVP_uniform_buffer,
-            },
+            resource: { buffer: MVP_uniform_buffer },
         },
         {
             binding: 1,
-            resource: {
-                buffer: wireframe_uniform_buffer,
-            },
+            resource: { buffer: wireframe_uniform_buffer },
+        },
+        { 
+            binding: 2, 
+            resource: { buffer: vertexBuffer },
+        },
+        { 
+            binding: 3, 
+            resource: { buffer: vertexBuffer },
         },
         ],
     });
-    // #endregion
 
-    // Write wireframeSettings into uniform buffer
+    // write wireframeSettings into uniform buffer
     // #region
     // Convert data to typed arrays
     const widthArray = new Float32Array([wireframeSettings.width]);
@@ -314,9 +347,6 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         ],
     };
 
-    let time = 0;
-    const gravity = -9.8;
-
     // define render loop
     function frame() {
         time += 0.016;
@@ -328,23 +358,15 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         
         device.queue.writeBuffer(MVP_uniform_buffer, 0, modelViewProjectionMatrix);
         
-        // setup vertex and index buffers
+        // update vertex buffer
         // #region
         const vertexBuffer = device.createBuffer({
             size: vertexBufferSize,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
             mappedAtCreation: true,
         });
         new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
         vertexBuffer.unmap();
-
-        const indexBuffer = device.createBuffer({
-            size: indexBufferSize,
-            usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-            mappedAtCreation: true,
-        });
-        new Uint32Array(indexBuffer.getMappedRange()).set(indices);
-        indexBuffer.unmap();
         // #endregion
 
         renderPassDescriptor.colorAttachments[0].view = context

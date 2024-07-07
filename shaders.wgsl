@@ -25,33 +25,28 @@ fn vertex_main(@location(0) position: vec4<f32>,
     output.position = uniforms.modelViewProjection * position;
     output.color = color;
     return output;
-} 
+}
+
+fn edgeFactor(bary: vec3f) -> f32 {
+  let d = fwidth(bary);
+  let a3 = smoothstep(vec3f(0.0), d * wireframeSettings.width, bary);
+  return min(min(a3.x, a3.y), a3.z);
+}
 
 @fragment
 fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     // Calculate partial derivatives of position
-    let ddx = vec3(
-        fragData.position.x + 1.0 - fragData.position.x,
-        fragData.position.y + 1.0 - fragData.position.y,
-        fragData.position.z + 1.0 - fragData.position.z
-    );
-    
-    let ddy = vec3(
-        fragData.position.x + 1.0 - fragData.position.x,
-        fragData.position.y + 1.0 - fragData.position.y,
-        fragData.position.z + 1.0 - fragData.position.z
-    );
+    let ddx = dpdx(fragData.position);   
+    let ddy = dpdy(fragData.position);
     // Calculate the length of the gradient to detect edges
-    let edgeFactor = length(vec3(ddx.y * ddy.z - ddx.z * ddy.y,
-                                 ddx.z * ddy.x - ddx.x * ddy.z,
-                                 ddx.x * ddy.y - ddx.y * ddy.x));
+    let edgeFactor = length(cross(ddx, ddy));
 
     // Edge threshold to determine wireframe
     let edgeThreshold = 0.1; // Adjust this threshold as needed
 
-    if (edgeFactor < edgeThreshold) {
+    if (edgeFactor > edgeThreshold) {
         return wireframeSettings.color;  // Color the wireframe
     } else {
-        return fragData.color + wireframeSettings.color;  // Color the triangle interior
+        return fragData.color;  // Color the triangle interior
     }
 }
