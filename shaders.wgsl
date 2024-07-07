@@ -19,7 +19,9 @@ var<uniform> uniforms : Uniforms;
 @group(0) @binding(1)
 var<uniform> wireframeSettings : WireframeSettings;
 @group(0) @binding(2)
-var<storage, read> vertexBuffer : array<VertexOut>;
+var<storage, read> vertexBuffer : array<f32>;
+@group(0) @binding(3) 
+var<storage, read> indexBuffer: array<u32>;
 
 @vertex
 fn vertex_main(@location(0) position: vec4<f32>,
@@ -27,14 +29,23 @@ fn vertex_main(@location(0) position: vec4<f32>,
                 @builtin(vertex_index) vertexIdx: u32) -> VertexOut {
     var output : VertexOut;
 
-    let vertNdx = vertexIdx % 3u;
+    let index = indexBuffer[vertexIdx];
+    //let vertexPos = vec4<f32>(vertexBuffer[index * 8u], vertexBuffer[index * 8u + 1u], vertexBuffer[index * 8u + 2u], 1.0);
     output.position = uniforms.modelViewProjection * position;
-    //output.color = color;
 
     // Assign barycentric coordinates based on the vertex index in the triangle
+    let vertNdx = vertexIdx % 3u;
     output.barycentric = vec3<f32>(0.0);
     output.barycentric[vertNdx] = 1.0;
-    output.color = vec4<f32>(output.barycentric, 1.0);
+    // let bufferLength = arrayLength(&indexBuffer);
+    // if (bufferLength == 486u) {
+    //     output.color = color;
+    // } else {
+    //     output.color = vec4<f32>(1.0);
+    // }
+    
+    output.color = color;
+    //output.color = vec4<f32>(output.barycentric, 1.0);
 
     return output;
 }
@@ -49,9 +60,10 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
 
     let edgeFactor = min(min(edgeSmoothFactor.x, edgeSmoothFactor.y), edgeSmoothFactor.z);
 
-    if (edgeFactor < 0.1) {
-        return wireframeSettings.color;  // color the wireframe
-    } else {
-        return fragData.color;  // color the triangle interior
-    }
+    //if (edgeFactor < 0.1) {
+    //    return wireframeSettings.color;  // color the wireframe
+    //} else {
+    return vec4<f32>(edgeSmoothFactor, 1.0);
+    //return fragData.color;  // color the triangle interior
+    //}
 }
