@@ -1,41 +1,49 @@
-function generateVertices(width, height, cellSize, vertices, indices) {
+function generateVertices(width, length, cellSize, vertices, indices) {
+    // vertices
     for (let i = 0; i < width; i++) {
-        for (let j = 0; j < height; j++) {
+        for (let j = 0; j < length; j++) {
             const posX = i * cellSize;
             const posZ = j * cellSize;
 
             vertices.push(posX, 0.0, posZ, 1, 0.5, 0.5, 0.5, 1);
-
-            const bottomLeft  = i * (height) + j;
-            const bottomRight = bottomLeft + 1;
-            const topLeft     = bottomLeft + (height);
-            const topRight    = topLeft + 1;
-
-            // first triangle
-            indices.push(bottomLeft, bottomRight, topRight);
-            // second triangle
-            indices.push(bottomLeft, topRight, topLeft);
+            //console.log(posX, posZ);
         }
     }
+    // indices
+    for (let i = 0; i < width - 1; i++) {
+        for (let j = 0; j < length - 1; j++) {
+            const topLeft     = i * length + j;
+            const topRight    = topLeft + 1;
+            const bottomLeft  = (i + 1) * length + j;
+            const bottomRight = bottomLeft + 1;
+
+            // First triangle
+            indices.push(topLeft, bottomLeft, topRight);
+
+            // Second triangle
+            indices.push(topRight, bottomLeft, bottomRight);
+        }
+    }
+    console.log(indices.length);
 }
 
-function simulateCloth(vertices, clothWidth, clothHeight, gravity, time) {
+function simulateCloth(vertices, clothWidth, clothLength, gravity, time) {
     for (let i = 0; i < clothWidth; i++) {
-        for (let j = 0; j < clothHeight; j++) {
-            const index = (i * (clothHeight) + j) * 8;
+        for (let j = 0; j < clothLength; j++) {
+            const index = (i * (clothLength) + j) * 8;
 
             // fixed cornerns
             if(
             (i === 0              && j === 0              ) || 
-            (i === 0              && j === clothHeight - 1) || 
+            (i === 0              && j === clothLength - 1) || 
             (i === clothWidth - 1 && j === 0              ) || 
-            (i === clothWidth - 1 && j === clothHeight - 1)) {
+            (i === clothWidth - 1 && j === clothLength - 1)) {
                 continue;
             }
 
             // center vertex sine wave movement
-            if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothHeight / 2)) {
-                vertices[index + 1] = Math.sin(time) * 1.0;
+            if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothLength / 2)) {
+                vertices[index + 1] = Math.sin(time * 2) * 4.0;
                 continue;
             }
 
@@ -47,9 +55,9 @@ function simulateCloth(vertices, clothWidth, clothHeight, gravity, time) {
 const init = async () => { 
     const vertices = [];
     const indices = [];
-    const clothWidth = 5;
-    const clothHeight = 5;
-    const clothCellSize = 0.25;
+    const clothWidth = 10;
+    const clothLength = 10;
+    const clothCellSize = 1.0;
 
     let time = 0;
     const gravity = -9.8;
@@ -108,7 +116,7 @@ const init = async () => {
 
     // create vertices
     // #region
-    generateVertices(clothWidth, clothHeight, clothCellSize, vertices, indices);
+    generateVertices(clothWidth, clothLength, clothCellSize, vertices, indices);
     const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
     const indexBufferSize = indices.length * Uint32Array.BYTES_PER_ELEMENT;
     //console.log(vertices.length / 8);
@@ -165,6 +173,7 @@ struct WireframeSettings {
 struct VertexOut {
     @builtin(position) position : vec4<f32>,
     @location(0) color : vec4<f32>,
+    @location(1) barycentric: vec3<f32>,
 };
 
 @group(0) @binding(0) 
@@ -172,39 +181,42 @@ var<uniform> uniforms : Uniforms;
 
 @group(0) @binding(1)
 var<uniform> wireframeSettings : WireframeSettings;
+@group(0) @binding(2)
+var<storage, read> vertexBuffer : array<VertexOut>;
 
 @vertex
 fn vertex_main(@location(0) position: vec4<f32>,
-                @location(1) color: vec4<f32>) -> VertexOut {
+                @location(1) color: vec4<f32>,
+                @builtin(vertex_index) vertexIdx: u32) -> VertexOut {
     var output : VertexOut;
-    output.position = uniforms.modelViewProjection * position;
-    output.color = color;
-    return output;
-} 
 
-fn edgeFactor(bary: vec3f) -> f32 {
-  let d = fwidth(bary);
-  let a3 = smoothstep(vec3f(0.0), d * wireframeSettings.width, bary);
-  return min(min(a3.x, a3.y), a3.z);
+    let vertNdx = vertexIdx % 3u;
+    output.position = uniforms.modelViewProjection * position;
+    //output.color = color;
+
+    // Assign barycentric coordinates based on the vertex index in the triangle
+    output.barycentric = vec3<f32>(0.0);
+    output.barycentric[vertNdx] = 1.0;
+    output.color = vec4<f32>(output.barycentric, 1.0);
+
+    return output;
 }
 
 @fragment
 fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
-    // Calculate partial derivatives of position
-    let ddx = dpdx(fragData.position.xy);
-    let ddy = dpdy(fragData.position.xy);
-    
-    // Calculate the determinant to find edge presence
-    let edgeFactor = abs(ddx.x * ddy.y - ddx.y * ddy.x);
+    let bary = fragData.barycentric;
 
-    // Edge threshold to determine wireframe
-    let edgeThreshold = 1.0; // Adjust this threshold as needed
+    // use smoothstep for anti-aliasing the edges
+    let edgeThreshold = wireframeSettings.width * fwidth(bary);
+    let edgeSmoothFactor = smoothstep(vec3<f32>(0.0), edgeThreshold, bary);
 
-    if (edgeFactor < edgeThreshold) {
-        return wireframeSettings.color;  // Color the wireframe
-    } else {
-        return fragData.color;  // Color the triangle interior
-    }
+    let edgeFactor = min(min(edgeSmoothFactor.x, edgeSmoothFactor.y), edgeSmoothFactor.z);
+
+    //if (edgeFactor == 0.0) {
+    //    return wireframeSettings.color;  // color the wireframe
+    //} else {
+        return fragData.color;  // color the triangle interior
+    //}
 }
         `,
     });
@@ -217,7 +229,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     const modelViewProjectionMatrix = glMatrix.mat4.create();
 
     glMatrix.mat4.lookAt(viewMatrix, 
-        [clothHeight * clothCellSize * 2.15, clothHeight * clothCellSize * 1.9, clothHeight * clothCellSize * 2.15], 
+        [clothLength * clothCellSize * 2.15, clothLength * clothCellSize * 1.9, clothLength * clothCellSize * 2.15], 
         [0, 0, 0], 
         [0, 1, 0]
     );
@@ -225,7 +237,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
 
     const wireframeSettings = {
         width: 1.0,
-        color: [0.0, 0.0, 0.0, 1.0]
+        color: [1.0, 0.0, 0.0, 1.0]
     };
 
     const MVP_uniform_buffer = device.createBuffer({
@@ -351,7 +363,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     function frame() {
         time += 0.016;
 
-        simulateCloth(vertices, clothWidth, clothHeight, gravity, time);
+        simulateCloth(vertices, clothWidth, clothLength, gravity, time);
 
         glMatrix.mat4.multiply(modelViewProjectionMatrix, viewMatrix, modelMatrix);
         glMatrix.mat4.multiply(modelViewProjectionMatrix, projectionMatrix, modelViewProjectionMatrix);
