@@ -1,0 +1,44 @@
+struct VertexBuffer {
+    vertices : array<Vertex>,
+};
+
+struct DistanceConstraintsBuffer {
+    constraints : array<DistanceConstraint>,
+};
+
+@group(0) @binding(0)
+var<storage, read_write> verticesBuffer : VertexBuffer;
+
+@group(0) @binding(1)
+var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
+    let vertexIndex = global_id.x;
+
+    // Simulate cloth dynamics using PBD
+
+    // 1. Initialize variables
+    let vertex = &vertexBuffer.vertices[vertexIndex];
+    var newPosition : vec3<f32> = vertex.position;
+
+    // 2. Apply distance constraints
+    for (var i = 0u; i < distanceConstraintsBuffer.constraints.length(); i = i + 1u) {
+        let constraint = distanceConstraintsBuffer.constraints[i];
+        
+        if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
+            // Resolve indices
+            let otherIndex = vertexIndex == constraint.vertex1 ? constraint.vertex2 : constraint.vertex1;
+
+            // Calculate correction based on current positions
+            let delta = verticesBuffer.vertices[otherIndex].position - vertex.position;
+            let currentDistance = length(delta);
+            let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
+            
+            newPosition += correction * vertex.invMass;
+        }
+    }
+
+    // 3. Update predicted position
+    vertexBuffer.vertices[vertexIndex].predictedPosition = newPosition;
+}

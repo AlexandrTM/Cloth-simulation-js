@@ -26,30 +26,30 @@ function generateVertices(width, length, cellSize, vertices, indices) {
     //console.log(Math.max( ...indices ));
 }
 
-function simulateCloth(vertices, clothWidth, clothLength, gravity, time) {
-    for (let i = 0; i < clothWidth; i++) {
-        for (let j = 0; j < clothLength; j++) {
-            const index = (i * (clothLength) + j) * 8;
+// function simulateCloth(vertices, clothWidth, clothLength, gravity, time) {
+//     for (let i = 0; i < clothWidth; i++) {
+//         for (let j = 0; j < clothLength; j++) {
+//             const index = (i * (clothLength) + j) * 8;
 
-            // fixed cornerns
-            if(
-            (i === 0              && j === 0              ) || 
-            (i === 0              && j === clothLength - 1) || 
-            (i === clothWidth - 1 && j === 0              ) || 
-            (i === clothWidth - 1 && j === clothLength - 1)) {
-                continue;
-            }
+//             // fixed cornerns
+//             if(
+//             (i === 0              && j === 0              ) || 
+//             (i === 0              && j === clothLength - 1) || 
+//             (i === clothWidth - 1 && j === 0              ) || 
+//             (i === clothWidth - 1 && j === clothLength - 1)) {
+//                 continue;
+//             }
 
-            // center vertex sine wave movement
-            if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothLength / 2)) {
-                vertices[index + 1] = Math.sin(time * 2) * 8.0;
-                continue;
-            }
+//             // center vertex sine wave movement
+//             if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothLength / 2)) {
+//                 vertices[index + 1] = Math.sin(time * 2) * 8.0;
+//                 continue;
+//             }
 
-            //vertices[index + 1] += gravity * 0.016; // Apply gravity to the y-coordinate
-        }
-    }
-}
+//             //vertices[index + 1] += gravity * 0.016; // Apply gravity to the y-coordinate
+//         }
+//     }
+// }
 
 const init = async () => { 
     const vertices = [];
@@ -57,6 +57,8 @@ const init = async () => {
     const clothWidth = 10;
     const clothLength = 10;
     const clothCellSize = 1.0;
+
+    let distanceConstraints = [];
 
     let time = 0;
     const gravity = -9.8;
@@ -202,12 +204,6 @@ fn vertex_main(@location(0) position: vec4<f32>,
     let vertNdx = vertexIdx % 3u;
     output.barycentric = vec3<f32>(0.0);
     output.barycentric[vertNdx] = 1.0;
-    // let bufferLength = arrayLength(&indexBuffer);
-    // if (bufferLength == 486u) {
-    //     output.color = color;
-    // } else {
-    //     output.color = vec4<f32>(1.0);
-    // }
     
     output.color = color;
     //output.color = vec4<f32>(output.barycentric, 1.0);
@@ -217,25 +213,22 @@ fn vertex_main(@location(0) position: vec4<f32>,
 
 @fragment
 fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
-    let bary = fragData.barycentric;
+    //let bary = fragData.barycentric;
 
     // use smoothstep for anti-aliasing the edges
-    let edgeThreshold = wireframeSettings.width * fwidth(bary);
-    let edgeSmoothFactor = smoothstep(vec3<f32>(0.0), edgeThreshold, bary);
+    //let edgeThreshold = wireframeSettings.width * fwidth(bary);
+    //let edgeSmoothFactor = smoothstep(vec3<f32>(0.0), edgeThreshold, bary);
 
-    let edgeFactor = min(min(edgeSmoothFactor.x, edgeSmoothFactor.y), edgeSmoothFactor.z);
+    //let edgeFactor = min(min(edgeSmoothFactor.x, edgeSmoothFactor.y), edgeSmoothFactor.z);
 
     //if (edgeFactor < 0.1) {
     //    return wireframeSettings.color;  // color the wireframe
     //} else {
     //return vec4<f32>(edgeSmoothFactor, 1.0);
-    //return fragData.color;  // color the triangle interior
+    return fragData.color;  // color the triangle interior
     //}
-    let a = 1.0 - edgeFactor;
-
-    return vec4((fragData.color.rgb + 0.5) * a, a);
 }
-        `,
+    `
     });
 
     // create MVP matrix, wireframe and uniform buffers
@@ -291,8 +284,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
                 visibility: GPUShaderStage.VERTEX, 
                 buffer: { type: 'read-only-storage' },
             },
-        ],
-        })],
+        ]})]
     });
 
     // create render pipeline
@@ -306,10 +298,8 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         fragment: {
         module: shaderModule,
         entryPoint: "fragment_main",
-        targets: [
-            {
-            format: presentationFormat,
-            },
+        targets: [ 
+            { format: presentationFormat }, 
         ],
         },
         primitive: {
@@ -367,11 +357,121 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         },
         ],
     };
+
+    // compute pipeline
+    // #region
+    // initialize distance constraints
+    let distanceConstraintsBuffer = device.createBuffer({
+        size: distanceConstraints.length * Float32Array.BYTES_PER_ELEMENT * 3, // each distance constraint has 3 floats (vertex1, vertex2, restLength)
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+    });
+
+    const computeShaderModule = device.createShaderModule({
+        code: `
+struct VertexBuffer {
+    vertices : array<Vertex>,
+};
+
+struct DistanceConstraintsBuffer {
+    constraints : array<DistanceConstraint>,
+};
+
+@group(0) @binding(0)
+var<storage, read_write> verticesBuffer : VertexBuffer;
+
+@group(0) @binding(1)
+var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
+    let vertexIndex = global_id.x;
+
+    // Simulate cloth dynamics using PBD
+
+    // 1. Initialize variables
+    let vertex = &vertexBuffer.vertices[vertexIndex];
+    var newPosition : vec3<f32> = vertex.position;
+
+    // 2. Apply distance constraints
+    for (var i = 0u; i < distanceConstraintsBuffer.constraints.length(); i = i + 1u) {
+        let constraint = distanceConstraintsBuffer.constraints[i];
+        
+        if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
+            // Resolve indices
+            let otherIndex = vertexIndex == constraint.vertex1 ? constraint.vertex2 : constraint.vertex1;
+
+            // Calculate correction based on current positions
+            let delta = verticesBuffer.vertices[otherIndex].position - vertex.position;
+            let currentDistance = length(delta);
+            let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
+            
+            newPosition += correction * vertex.invMass;
+        }
+    }
+
+    // 3. Update predicted position
+    vertexBuffer.vertices[vertexIndex].predictedPosition = newPosition;
+}
+        `
+    });
+
+    // Create compute pipeline layout
+    const computePipelineLayout = device.createPipelineLayout({
+        bindGroupLayouts: [ device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: 'storage', },
+            },
+            {
+                binding: 1,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: 'storage', },
+            },
+        ]})]
+    });
+
+    const computePipeline = device.createComputePipeline({
+        layout: computePipelineLayout,
+        compute: {
+            module: computeShaderModule,
+            entryPoint: 'main',
+        },
+    });
+
+    const computeBindGroup = device.createBindGroup({
+        layout: computePipeline.getBindGroupLayout(0),
+        entries: [
+            {
+                binding: 0,
+                resource: { buffer: vertexBuffer },
+            },
+            {
+                binding: 1,
+                resource: { buffer: distanceConstraintsBuffer },
+            },
+        ],
+    });
+    // #endregion
+
     // define render loop
     function frame() {
         time += 0.016;
 
-        simulateCloth(vertices, clothWidth, clothLength, gravity, time);
+        //simulateCloth(vertices, clothWidth, clothLength, gravity, time);
+        const dispatchSize = Math.ceil(vertices.length / 64); // Adjust workgroup size as needed
+
+        const commandEncoder = device.createCommandEncoder();
+        const computePassEncoder = commandEncoder.beginComputePass();
+        computePassEncoder.setPipeline(computePipeline);
+        computePassEncoder.setBindGroup(0, computeBindGroup);
+        computePassEncoder.dispatchWorkgroups(dispatchSize);
+        computePassEncoder.end();
+
+        device.queue.submit([commandEncoder.finish()]);
+
+
 
         glMatrix.mat4.multiply(modelViewProjectionMatrix, viewMatrix, modelMatrix);
         glMatrix.mat4.multiply(modelViewProjectionMatrix, projectionMatrix, modelViewProjectionMatrix);
@@ -392,7 +492,6 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         renderPassDescriptor.colorAttachments[0].view = context
         .getCurrentTexture().createView();
         
-        const commandEncoder = device.createCommandEncoder();
         const passEncoder =
         commandEncoder.beginRenderPass(renderPassDescriptor);
 

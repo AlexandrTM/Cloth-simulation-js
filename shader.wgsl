@@ -37,12 +37,6 @@ fn vertex_main(@location(0) position: vec4<f32>,
     let vertNdx = vertexIdx % 3u;
     output.barycentric = vec3<f32>(0.0);
     output.barycentric[vertNdx] = 1.0;
-    // let bufferLength = arrayLength(&indexBuffer);
-    // if (bufferLength == 486u) {
-    //     output.color = color;
-    // } else {
-    //     output.color = vec4<f32>(1.0);
-    // }
     
     output.color = color;
     //output.color = vec4<f32>(output.barycentric, 1.0);
