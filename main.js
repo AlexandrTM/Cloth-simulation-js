@@ -415,7 +415,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         size: 4,
         usage: GPUBufferUsage.UNIFORM,
     });
-    device.queue.writeBuffer(gravitySettingsBuffer, 0, 
+    device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
         new Uint32Array([time]));
     // #endregion
 
@@ -558,7 +558,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             size: 4,
             usage: GPUBufferUsage.UNIFORM,
         });
-        device.queue.writeBuffer(gravitySettingsBuffer, 0, 
+        device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
             new Uint32Array([time]));
 
         updateGravitySettingsBuffer();
