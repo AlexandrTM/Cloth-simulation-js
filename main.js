@@ -37,6 +37,8 @@ function generateVertices(width, length, cellSize, vertices, indices) {
         }
     }
     //console.log(Math.max( ...indices ));
+    //console.log(vertices.length);
+    //console.log(vertices.length / 13);
 }
 
 function generateDistanceConstraints(width, length) {
@@ -442,7 +444,6 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
-    device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
         new Uint32Array([time]));
 
     function updateTimeBuffer() {
@@ -464,13 +465,6 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
 
     const computeShaderModule = device.createShaderModule({
         code: `
-struct Vertex {
-    position : vec4<f32>,
-    color : vec4<f32>,
-    invMass : f32,
-    predictedPosition : vec4<f32>,
-};
-
 struct DistanceConstraint {
     vertex1 : u32,
     vertex2 : u32,
@@ -480,6 +474,13 @@ struct DistanceConstraint {
 struct GravitySettings { // alignment 16
     gravityEnabled: u32,
     gravity: vec3<f32>,
+};
+
+struct Vertex {
+    position : vec4<f32>,
+    color : vec4<f32>,
+    invMass : f32,
+    predictedPosition : vec4<f32>,
 };
 
 struct VertexBuffer {
@@ -514,6 +515,22 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
     }
 
+    // Apply sinusoidal movement to the center vertex
+    if (vertexIndex == 50u) {
+        let amplitude = 1.5;
+        let frequency = 1.0;
+
+        let displacement = vec3<f32>(
+            amplitude * sin(timeSinceLaunch * frequency),
+            0.0,
+            0.0,
+        );
+
+        newPosition.x += displacement.x;
+        // newPosition.y += displacement.y;
+        // newPosition.z += displacement.z;
+    }
+
     // Apply distance constraints
     for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
         let constraint = distanceConstraintsBuffer.constraints[i];
@@ -535,7 +552,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     }
 
     // Update predicted position
-    vertexBuffer.vertices[vertexIndex].predictedPosition = newPosition;
+    vertexBuffer.vertices[vertexIndex].position = newPosition;
 }
         `
     });
@@ -593,7 +610,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         updateTimeBuffer();
         updateGravitySettingsBuffer();
 
-        const dispatchSize = Math.ceil(vertices.length / 52);
+        const dispatchSize = Math.ceil(vertices.length / 13);
         const computeCommandEncoder = device.createCommandEncoder();
         const computePassEncoder = computeCommandEncoder.beginComputePass();
         computePassEncoder.setPipeline(computePipeline);

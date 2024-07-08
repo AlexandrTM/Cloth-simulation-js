@@ -48,6 +48,22 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
     }
 
+    // Apply sinusoidal movement to the center vertex
+    if (vertexIndex == 50u) {
+        let amplitude = 0.5;
+        let frequency = 1.0;
+
+        let displacement = vec3<f32>(
+            amplitude * sin(timeSinceLaunch * frequency),
+            0.0,
+            0.0,
+        );
+
+        newPosition.x += displacement.x;
+        // newPosition.y += displacement.y;
+        // newPosition.z += displacement.z;
+    }
+
     // Apply distance constraints
     for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
         let constraint = distanceConstraintsBuffer.constraints[i];
