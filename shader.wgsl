@@ -15,7 +15,6 @@ struct VertexOut {
 
 @group(0) @binding(0) 
 var<uniform> uniforms : Uniforms;
-
 @group(0) @binding(1)
 var<uniform> wireframeSettings : WireframeSettings;
 @group(0) @binding(2)

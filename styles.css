@@ -1,0 +1,19 @@
+.controls {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 100;
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 10px;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+}
+
+.controls label {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+}
+
+input[type="checkbox"] {
+    margin-right: 5px;
+}

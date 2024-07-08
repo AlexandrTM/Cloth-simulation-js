@@ -14,10 +14,10 @@ function generateVertices(width, length, cellSize, vertices, indices) {
             const invMass = isCorner ? 0.0 : 1.0;
 
             vertices.push(
-                posX, 0.0, posZ, 1, // postion
-                0.5, 0.5, 0.5, 1, // color
-                invMass,
-                posX, 0.0, posZ, 1.0  // predicted position
+                posX, 0.0, posZ, 1,  // postion
+                0.5, 0.5, 0.5, 1,    // color
+                invMass,             // inverse mass
+                posX, 0.0, posZ, 1.0 // predicted position
             );
         }
     }
@@ -90,11 +90,24 @@ const init = async () => {
     const clothLength = 10;
     const clothCellSize = 1.0;
 
-    const constraints = generateDistanceConstraints(clothWidth, clothLength);
     let distanceConstraints = [];
+    
+    // initialize distance constraints
+    const constraints = generateDistanceConstraints(clothWidth, clothLength);
+    for (let i = 0; i < constraints.length; i++) {
+        const constraint = constraints[i];
+        const baseIndex = i * 3;
+        distanceConstraints[baseIndex    ] = constraint.vertex1;
+        distanceConstraints[baseIndex + 1] = constraint.vertex2;
+        distanceConstraints[baseIndex + 2] = constraint.restLength;
+    }
 
     let time = 0;
-    const gravity = -9.8;
+    
+    const gravitySettings = {
+        gravityEnabled: true,
+        gravity: [0.0, -9.8, 0.0],
+    };
 
     // canvas resizing
     // #region
@@ -205,7 +218,38 @@ const init = async () => {
     new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
     vertexBuffer.unmap();
     // #endregion
-    
+
+    // create MVP matrix, wireframe and uniform buffers
+    // #region
+    const modelMatrix = glMatrix.mat4.create();
+    const viewMatrix = glMatrix.mat4.create();
+    const projectionMatrix = glMatrix.mat4.create();
+    const modelViewProjectionMatrix = glMatrix.mat4.create();
+
+    glMatrix.mat4.lookAt(viewMatrix, 
+        [clothLength * clothCellSize * 2.15, clothLength * clothCellSize * 1.9, clothLength * clothCellSize * 2.15], 
+        [0, 0, 0], 
+        [0, 1, 0]
+    );
+    glMatrix.mat4.perspective(projectionMatrix, Math.PI / 4, canvas.clientWidth / canvas.clientHeight, 0.1, 10000);
+
+    const wireframeSettings = {
+        width: 1.0,
+        color: [1.0, 0.0, 0.0, 1.0]
+    };
+
+    const MVP_uniform_buffer = device.createBuffer({
+        size: modelViewProjectionMatrix.byteLength,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const wireframe_uniform_buffer = device.createBuffer({
+        size: Math.ceil(Float32Array.BYTES_PER_ELEMENT * (1 + wireframeSettings.color.length) / 16) * 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    // #endregion
+
+    // render pipeline
+    // #region
     // load shader
     const shaderModule = device.createShaderModule({
         code: `
@@ -226,7 +270,6 @@ struct VertexOut {
 
 @group(0) @binding(0) 
 var<uniform> uniforms : Uniforms;
-
 @group(0) @binding(1)
 var<uniform> wireframeSettings : WireframeSettings;
 @group(0) @binding(2)
@@ -277,35 +320,6 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     `
     });
 
-    // create MVP matrix, wireframe and uniform buffers
-    // #region
-    const modelMatrix = glMatrix.mat4.create();
-    const viewMatrix = glMatrix.mat4.create();
-    const projectionMatrix = glMatrix.mat4.create();
-    const modelViewProjectionMatrix = glMatrix.mat4.create();
-
-    glMatrix.mat4.lookAt(viewMatrix, 
-        [clothLength * clothCellSize * 2.15, clothLength * clothCellSize * 1.9, clothLength * clothCellSize * 2.15], 
-        [0, 0, 0], 
-        [0, 1, 0]
-    );
-    glMatrix.mat4.perspective(projectionMatrix, Math.PI / 4, canvas.clientWidth / canvas.clientHeight, 0.1, 10000);
-
-    const wireframeSettings = {
-        width: 1.0,
-        color: [1.0, 0.0, 0.0, 1.0]
-    };
-
-    const MVP_uniform_buffer = device.createBuffer({
-        size: modelViewProjectionMatrix.byteLength,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    const wireframe_uniform_buffer = device.createBuffer({
-        size: Math.ceil(Float32Array.BYTES_PER_ELEMENT * (1 + wireframeSettings.color.length) / 16) * 16,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    // #endregion
-
     // create pipeline layout
     const pipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [device.createBindGroupLayout({
@@ -337,17 +351,17 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     const pipeline = device.createRenderPipeline({
         layout: pipelineLayout,
         vertex: {
-        module: shaderModule,
-        entryPoint: "vertex_main",
-        buffers: vertexBuffersDescriptors,
+            module: shaderModule,
+            entryPoint: "vertex_main",
+            buffers: vertexBuffersDescriptors,
         },
         fragment: {
-        module: shaderModule,
-        entryPoint: "fragment_main",
-        targets: [ { format: presentationFormat } ],
+            module: shaderModule,
+            entryPoint: "fragment_main",
+            targets: [ { format: presentationFormat } ],
         },
         primitive: {
-        topology: "triangle-list",
+            topology: "triangle-list",
         },
     });
 
@@ -355,24 +369,13 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     const uniformBindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
-        {
-            binding: 0,
-            resource: { buffer: MVP_uniform_buffer },
-        },
-        {
-            binding: 1,
-            resource: { buffer: wireframe_uniform_buffer },
-        },
-        { 
-            binding: 2, 
-            resource: { buffer: vertexBuffer },
-        },
-        { 
-            binding: 3, 
-            resource: { buffer: indexBuffer },
-        },
+        { binding: 0, resource: { buffer: MVP_uniform_buffer } },
+        { binding: 1, resource: { buffer: wireframe_uniform_buffer } },
+        { binding: 2, resource: { buffer: vertexBuffer } },
+        { binding: 3, resource: { buffer: indexBuffer } },
         ],
     });
+    // #endregion
 
     // write wireframeSettings into uniform buffer
     // #region
@@ -402,17 +405,29 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         ],
     };
 
+    // gravity settings
+    // #region
+    const gravitySettingsBuffer = device.createBuffer({
+        size: 16, // u32(bool) + vec3<f32>
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(gravitySettingsBuffer, 0, 
+        new Uint32Array([gravitySettings.gravityEnabled ? 1 : 0]));
+    device.queue.writeBuffer(gravitySettingsBuffer, 4, 
+        new Float32Array(gravitySettings.gravity));
+
+    function updateGravitySettingsBuffer() {
+        gravitySettings.gravityEnabled = document.getElementById('gravityCheckbox').checked;
+        const gravityArray = new Float32Array([
+            gravitySettings.applyGravity,
+            ...gravitySettings.gravity,
+        ]);
+        device.queue.writeBuffer(gravitySettingsBuffer, 0, gravityArray.buffer);
+    }
+    // #endregion
+
     // compute pipeline
     // #region
-    // initialize distance constraints
-    for (let i = 0; i < constraints.length; i++) {
-        const constraint = constraints[i];
-        const baseIndex = i * 3;
-        distanceConstraints[baseIndex] = constraint.vertex1;
-        distanceConstraints[baseIndex + 1] = constraint.vertex2;
-        distanceConstraints[baseIndex + 2] = constraint.restLength;
-    }
-
     let distanceConstraintsBuffer = device.createBuffer({
         size: distanceConstraints.length * Float32Array.BYTES_PER_ELEMENT * 3, // each distance constraint has 3 floats (vertex1, vertex2, restLength)
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
@@ -421,15 +436,21 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     const computeShaderModule = device.createShaderModule({
         code: `
 struct Vertex {
-    position : vec3<f32>,
+    position : vec4<f32>,
+    color : vec4<f32>,
     invMass : f32,
-    predictedPosition : vec3<f32>,
+    predictedPosition : vec4<f32>,
 };
 
 struct DistanceConstraint {
     vertex1 : u32,
     vertex2 : u32,
     restLength : f32,
+};
+
+struct GravitySettings {
+    gravityEnabled: u32,
+    gravity: vec3<f32>, // alignment 16
 };
 
 struct VertexBuffer {
@@ -442,9 +463,10 @@ struct DistanceConstraintsBuffer {
 
 @group(0) @binding(0)
 var<storage, read_write> vertexBuffer : VertexBuffer;
-
 @group(0) @binding(1)
 var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
+@group(0) @binding(2)
+var<uniform> gravitySettings : GravitySettings;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
@@ -452,11 +474,16 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
     // Simulate cloth dynamics using PBD
 
-    // 1. Initialize variables
+    // Initialize variables
     let vertex = vertexBuffer.vertices[vertexIndex];
-    var newPosition : vec3<f32> = vertex.position;
+    var newPosition : vec4<f32> = vertex.position;
 
-    // 2. Apply distance constraints
+    // Apply gravity if enabled
+    if (gravitySettings.gravityEnabled == 1u && vertex.invMass > 0.0) {
+        newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
+    }
+
+    // Apply distance constraints
     for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
         let constraint = distanceConstraintsBuffer.constraints[i];
         
@@ -476,7 +503,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         }
     }
 
-    // 3. Update predicted position
+    // Update predicted position
     vertexBuffer.vertices[vertexIndex].predictedPosition = newPosition;
 }
         `
@@ -496,6 +523,11 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: 'read-only-storage', },
             },
+            {
+                binding: 2,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: 'uniform' },
+            },
         ]})]
     });
 
@@ -510,14 +542,9 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     const computeBindGroup = device.createBindGroup({
         layout: computePipeline.getBindGroupLayout(0),
         entries: [
-            {
-                binding: 0,
-                resource: { buffer: vertexBuffer },
-            },
-            {
-                binding: 1,
-                resource: { buffer: distanceConstraintsBuffer },
-            },
+            { binding: 0, resource: { buffer: vertexBuffer } },
+            { binding: 1, resource: { buffer: distanceConstraintsBuffer } },
+            { binding: 2, resource: { buffer: gravitySettingsBuffer } },
         ],
     });
     // #endregion
@@ -526,8 +553,10 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     function frame() {
         time += 0.016;
 
+        updateGravitySettingsBuffer();
+
         //simulateCloth(vertices, clothWidth, clothLength, gravity, time);
-        const dispatchSize = Math.ceil(vertices.length / 64); // Adjust workgroup size as needed
+        const dispatchSize = Math.ceil(vertices.length / 52 / 64); // Adjust workgroup size as needed
         const computeCommandEncoder = device.createCommandEncoder();
         const computePassEncoder = computeCommandEncoder.beginComputePass();
         computePassEncoder.setPipeline(computePipeline);

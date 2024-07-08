@@ -11,6 +11,11 @@ struct DistanceConstraint {
     restLength : f32,
 };
 
+struct GravitySettings {
+    gravityEnabled: u32,
+    gravity: vec3<f32>, // alignment 16
+};
+
 struct VertexBuffer {
     vertices : array<Vertex>,
 };
@@ -21,9 +26,10 @@ struct DistanceConstraintsBuffer {
 
 @group(0) @binding(0)
 var<storage, read_write> vertexBuffer : VertexBuffer;
-
 @group(0) @binding(1)
 var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
+@group(0) @binding(2)
+var<uniform> gravitySettings : GravitySettings;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
@@ -31,11 +37,16 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
     // Simulate cloth dynamics using PBD
 
-    // 1. Initialize variables
+    // Initialize variables
     let vertex = vertexBuffer.vertices[vertexIndex];
     var newPosition : vec4<f32> = vertex.position;
 
-    // 2. Apply distance constraints
+    // Apply gravity if enabled
+    if (gravitySettings.gravityEnabled == 1u && vertex.invMass > 0.0) {
+        newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
+    }
+
+    // Apply distance constraints
     for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
         let constraint = distanceConstraintsBuffer.constraints[i];
         
@@ -55,6 +66,6 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         }
     }
 
-    // 3. Update predicted position
+    // Update predicted position
     vertexBuffer.vertices[vertexIndex].predictedPosition = newPosition;
 }
