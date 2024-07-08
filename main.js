@@ -69,30 +69,30 @@ function generateDistanceConstraints(width, length) {
     return distanceConstraints;
 }
 
-// function simulateCloth(vertices, clothWidth, clothLength, gravity, time) {
-//     for (let i = 0; i < clothWidth; i++) {
-//         for (let j = 0; j < clothLength; j++) {
-//             const index = (i * (clothLength) + j) * 8;
+function simulateClothOnHost(vertices, clothWidth, clothLength, gravity, time) {
+    for (let i = 0; i < clothWidth; i++) {
+        for (let j = 0; j < clothLength; j++) {
+            const index = (i * (clothLength) + j) * 13;
 
-//             // fixed cornerns
-//             if(
-//             (i === 0              && j === 0              ) || 
-//             (i === 0              && j === clothLength - 1) || 
-//             (i === clothWidth - 1 && j === 0              ) || 
-//             (i === clothWidth - 1 && j === clothLength - 1)) {
-//                 continue;
-//             }
+            // fixed cornerns
+            if(
+            (i === 0              && j === 0              ) || 
+            (i === 0              && j === clothLength - 1) || 
+            (i === clothWidth - 1 && j === 0              ) || 
+            (i === clothWidth - 1 && j === clothLength - 1)) {
+                continue;
+            }
 
-//             // center vertex sine wave movement
-//             if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothLength / 2)) {
-//                 vertices[index + 1] = Math.sin(time * 2) * 8.0;
-//                 continue;
-//             }
+            // center vertex sine wave movement
+            if (i === Math.floor(clothWidth / 2) && j === Math.floor(clothLength / 2)) {
+                vertices[index + 1] = Math.sin(time * 2) * 40.0;
+                continue;
+            }
 
-//             //vertices[index + 1] += gravity * 0.016; // Apply gravity to the y-coordinate
-//         }
-//     }
-// }
+            //vertices[index + 1] += gravity * 0.016; // Apply gravity to the y-coordinate
+        }
+    }
+}
 
 const init = async () => { 
     const vertices = [];
@@ -212,6 +212,8 @@ const init = async () => {
         });
         new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
         vertexBuffer.unmap();
+
+        return vertexBuffer;
     }
     // #endregion
 
@@ -511,13 +513,13 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     var newPosition : vec4<f32> = vertex.position;
 
     // Apply gravity if enabled
-    if (gravitySettings.gravityEnabled == 1u && vertex.invMass > 0.0) {
-        newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
-    }
+    // if (gravitySettings.gravityEnabled == 1u && vertex.invMass > 0.0) {
+    //     newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
+    // }
 
     // Apply sinusoidal movement to the center vertex
     if (vertexIndex == 50u) {
-        let amplitude = 1.5;
+        let amplitude = 25.5;
         let frequency = 1.0;
 
         let displacement = vec3<f32>(
@@ -532,24 +534,24 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     }
 
     // Apply distance constraints
-    for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
-        let constraint = distanceConstraintsBuffer.constraints[i];
+    // for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
+    //     let constraint = distanceConstraintsBuffer.constraints[i];
         
-        if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
-            // Resolve indices
-            var otherIndex = constraint.vertex2;
-            if (vertexIndex == constraint.vertex2) {
-                otherIndex = constraint.vertex1;
-            }
+    //     if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
+    //         // Resolve indices
+    //         var otherIndex = constraint.vertex2;
+    //         if (vertexIndex == constraint.vertex2) {
+    //             otherIndex = constraint.vertex1;
+    //         }
 
-            // Calculate correction based on current positions
-            let delta = vertexBuffer.vertices[otherIndex].position - vertex.position;
-            let currentDistance = length(delta);
-            let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
+    //         // Calculate correction based on current positions
+    //         let delta = vertexBuffer.vertices[otherIndex].position - vertex.position;
+    //         let currentDistance = length(delta);
+    //         let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
             
-            newPosition += correction * vertex.invMass;
-        }
-    }
+    //         newPosition += correction * vertex.invMass;
+    //     }
+    // }
 
     // Update predicted position
     vertexBuffer.vertices[vertexIndex].position = newPosition;
@@ -609,6 +611,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
         updateTimeBuffer();
         updateGravitySettingsBuffer();
+        //simulateClothOnHost(vertices, clothWidth, clothLength, -9.8, time)
 
         const dispatchSize = Math.ceil(vertices.length / 13);
         const computeCommandEncoder = device.createCommandEncoder();
@@ -620,7 +623,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         device.queue.submit([computeCommandEncoder.finish()]);
 
         updateMVPMatrix();
-        updateVertexBuffer();
+        const vertexBuffer = updateVertexBuffer();
 
         renderPassDescriptor.colorAttachments[0].view = context
         .getCurrentTexture().createView();
