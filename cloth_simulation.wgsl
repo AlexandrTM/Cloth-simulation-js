@@ -1,10 +1,3 @@
-struct Vertex {
-    position : vec4<f32>,
-    color : vec4<f32>,
-    invMass : f32,
-    predictedPosition : vec4<f32>,
-};
-
 struct DistanceConstraint {
     vertex1 : u32,
     vertex2 : u32,
@@ -14,6 +7,13 @@ struct DistanceConstraint {
 struct GravitySettings { // alignment 16
     gravityEnabled: u32,
     gravity: vec3<f32>,
+};
+
+struct Vertex {
+    position : vec4<f32>,
+    color : vec4<f32>,
+    invMass : f32,
+    predictedPosition : vec4<f32>,
 };
 
 struct VertexBuffer {

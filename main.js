@@ -41,6 +41,7 @@ function generateVertices(width, length, cellSize, vertices, indices) {
 
 function generateDistanceConstraints(width, length) {
     const constraints = [];
+    const distanceConstraints = [];
     const restLength = 1.0; // adjust based on the spacing between vertices
 
     for (let i = 0; i < width; i++) {
@@ -54,8 +55,16 @@ function generateDistanceConstraints(width, length) {
             }
         }
     }
+    
+    for (let i = 0; i < constraints.length; i++) {
+        const constraint = constraints[i];
+        const baseIndex = i * 3;
+        distanceConstraints[baseIndex    ] = constraint.vertex1;
+        distanceConstraints[baseIndex + 1] = constraint.vertex2;
+        distanceConstraints[baseIndex + 2] = constraint.restLength;
+    }
 
-    return constraints;
+    return distanceConstraints;
 }
 
 // function simulateCloth(vertices, clothWidth, clothLength, gravity, time) {
@@ -90,17 +99,7 @@ const init = async () => {
     const clothLength = 10;
     const clothCellSize = 1.0;
 
-    let distanceConstraints = [];
-    
-    // initialize distance constraints
-    const constraints = generateDistanceConstraints(clothWidth, clothLength);
-    for (let i = 0; i < constraints.length; i++) {
-        const constraint = constraints[i];
-        const baseIndex = i * 3;
-        distanceConstraints[baseIndex    ] = constraint.vertex1;
-        distanceConstraints[baseIndex + 1] = constraint.vertex2;
-        distanceConstraints[baseIndex + 2] = constraint.restLength;
-    }
+    let distanceConstraints = generateDistanceConstraints(clothWidth, clothLength);
 
     let time = 0;
     
@@ -202,6 +201,16 @@ const init = async () => {
     });
     new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
     vertexBuffer.unmap();
+
+    function updateVertexBuffer() {
+        const vertexBuffer = device.createBuffer({
+            size: vertexBufferSize,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+            mappedAtCreation: true,
+        });
+        new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
+        vertexBuffer.unmap();
+    }
     // #endregion
 
     // create MVP matrix, wireframe and uniform buffers
@@ -231,6 +240,12 @@ const init = async () => {
         size: Math.ceil(Float32Array.BYTES_PER_ELEMENT * (1 + wireframeSettings.color.length) / 16) * 16,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
+
+    function updateMVPMatrix() {
+        glMatrix.mat4.multiply(modelViewProjectionMatrix, viewMatrix, modelMatrix);
+        glMatrix.mat4.multiply(modelViewProjectionMatrix, projectionMatrix, modelViewProjectionMatrix);
+        device.queue.writeBuffer(MVP_uniform_buffer, 0, modelViewProjectionMatrix);
+    }
     // #endregion
 
     // render pipeline
@@ -240,6 +255,17 @@ const init = async () => {
         code: `
 struct Uniforms {
     modelViewProjection : mat4x4<f32>,
+};
+
+struct Vertex {
+    position : vec4<f32>,
+    color : vec4<f32>,
+    invMass : f32,
+    predictedPosition : vec4<f32>,
+};
+
+struct VertexBuffer {
+    vertices : array<Vertex>,
 };
 
 struct WireframeSettings {
@@ -258,7 +284,7 @@ var<uniform> uniforms : Uniforms;
 @group(0) @binding(1)
 var<uniform> wireframeSettings : WireframeSettings;
 @group(0) @binding(2)
-var<storage, read> vertexBuffer : array<f32>;
+var<storage, read> vertexBuffer : VertexBuffer;
 @group(0) @binding(3) 
 var<storage, read> indexBuffer: array<u32>;
 
@@ -360,6 +386,18 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         { binding: 3, resource: { buffer: indexBuffer } },
         ],
     });
+    
+    // create render pass descriptor
+    const renderPassDescriptor = {
+        colorAttachments: [
+        {
+            view: undefined, // Assigned later
+            clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            loadOp: "clear",
+            storeOp: "store",
+        },
+        ],
+    };
     // #endregion
 
     // write wireframeSettings into uniform buffer
@@ -377,18 +415,6 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     //console.log(wireframe_uniform_buffer.size);
     device.queue.writeBuffer(wireframe_uniform_buffer, 0, wireframeData);
     // #endregion
-
-    // create render pass descriptor
-    const renderPassDescriptor = {
-        colorAttachments: [
-        {
-            view: undefined, // Assigned later
-            clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
-            loadOp: "clear",
-            storeOp: "store",
-        },
-        ],
-    };
 
     // gravity settings and time buffer
     // #region
@@ -412,11 +438,20 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     }
 
     const timeSinceLaunchBuffer = device.createBuffer({
-        size: 4,
-        usage: GPUBufferUsage.UNIFORM,
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(gravitySettingsBuffer, 0, 
+    device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
         new Uint32Array([time]));
+
+    function updateTimeBuffer() {
+        const timeSinceLaunchBuffer = device.createBuffer({
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
+            new Uint32Array([time]));
+    }
     // #endregion
 
     // compute pipeline
@@ -554,16 +589,9 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     function frame() {
         time += 0.016;
 
-        const timeSinceLaunchBuffer = device.createBuffer({
-            size: 4,
-            usage: GPUBufferUsage.UNIFORM,
-        });
-        device.queue.writeBuffer(gravitySettingsBuffer, 0, 
-            new Uint32Array([time]));
-
+        updateTimeBuffer();
         updateGravitySettingsBuffer();
 
-        //simulateCloth(vertices, clothWidth, clothLength, gravity, time);
         const dispatchSize = Math.ceil(vertices.length / 52);
         const computeCommandEncoder = device.createCommandEncoder();
         const computePassEncoder = computeCommandEncoder.beginComputePass();
@@ -573,20 +601,8 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         computePassEncoder.end();
         device.queue.submit([computeCommandEncoder.finish()]);
 
-        glMatrix.mat4.multiply(modelViewProjectionMatrix, viewMatrix, modelMatrix);
-        glMatrix.mat4.multiply(modelViewProjectionMatrix, projectionMatrix, modelViewProjectionMatrix);
-        device.queue.writeBuffer(MVP_uniform_buffer, 0, modelViewProjectionMatrix);
-        
-        // update vertex buffer
-        // #region
-        const vertexBuffer = device.createBuffer({
-            size: vertexBufferSize,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
-            mappedAtCreation: true,
-        });
-        new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
-        vertexBuffer.unmap();
-        // #endregion
+        updateMVPMatrix();
+        updateVertexBuffer();
 
         renderPassDescriptor.colorAttachments[0].view = context
         .getCurrentTexture().createView();
@@ -601,6 +617,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         passEncoder.drawIndexed(indices.length, 1, 0, 0, 0);
         passEncoder.end();
         device.queue.submit([commandEncoder.finish()]);
+        
         requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);

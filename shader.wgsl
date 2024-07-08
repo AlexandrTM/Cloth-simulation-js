@@ -2,6 +2,17 @@ struct Uniforms {
     modelViewProjection : mat4x4<f32>,
 };
 
+struct Vertex {
+    position : vec4<f32>,
+    color : vec4<f32>,
+    invMass : f32,
+    predictedPosition : vec4<f32>,
+};
+
+struct VertexBuffer {
+    vertices : array<Vertex>,
+};
+
 struct WireframeSettings {
     width : f32,
     color : vec4<f32>,
@@ -18,7 +29,7 @@ var<uniform> uniforms : Uniforms;
 @group(0) @binding(1)
 var<uniform> wireframeSettings : WireframeSettings;
 @group(0) @binding(2)
-var<storage, read> vertexBuffer : array<f32>;
+var<storage, read> vertexBuffer : VertexBuffer;
 @group(0) @binding(3) 
 var<storage, read> indexBuffer: array<u32>;
 
