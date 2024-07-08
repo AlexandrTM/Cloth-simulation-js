@@ -3,14 +3,14 @@ struct Uniforms {
 };
 
 struct WireframeSettings {
-    width: f32,
-    color: vec4<f32>,
+    width : f32,
+    color : vec4<f32>,
 };
 
 struct VertexOut {
     @builtin(position) position : vec4<f32>,
     @location(0) color : vec4<f32>,
-    @location(1) barycentric: vec3<f32>,
+    @location(1) barycentric : vec3<f32>,
 };
 
 @group(0) @binding(0) 
@@ -26,6 +26,8 @@ var<storage, read> indexBuffer: array<u32>;
 @vertex
 fn vertex_main(@location(0) position: vec4<f32>,
                 @location(1) color: vec4<f32>,
+                @location(2) invMass: f32,
+                @location(3) predictedPosition: vec4<f32>,
                 @builtin(vertex_index) vertexIdx: u32) -> VertexOut {
     var output : VertexOut;
 
@@ -49,15 +51,15 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     let bary = fragData.barycentric;
 
     // use smoothstep for anti-aliasing the edges
-    let edgeThreshold = wireframeSettings.width * fwidth(bary);
-    let edgeSmoothFactor = smoothstep(vec3<f32>(0.0), edgeThreshold, bary);
+    //let edgeThreshold = wireframeSettings.width * fwidth(bary);
+    //let edgeSmoothFactor = smoothstep(vec3<f32>(0.0), edgeThreshold, bary);
 
-    let edgeFactor = min(min(edgeSmoothFactor.x, edgeSmoothFactor.y), edgeSmoothFactor.z);
+    //let edgeFactor = min(min(edgeSmoothFactor.x, edgeSmoothFactor.y), edgeSmoothFactor.z);
 
     //if (edgeFactor < 0.1) {
     //    return wireframeSettings.color;  // color the wireframe
     //} else {
-    return vec4<f32>(edgeSmoothFactor, 1.0);
-    //return fragData.color;  // color the triangle interior
+    //return vec4<f32>(edgeSmoothFactor, 1.0);
+    return fragData.color;  // color the triangle interior
     //}
 }

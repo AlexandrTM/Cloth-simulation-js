@@ -1,7 +1,8 @@
 struct Vertex {
-    position : vec3<f32>,
+    position : vec4<f32>,
+    color : vec4<f32>,
     invMass : f32,
-    predictedPosition : vec3<f32>,
+    predictedPosition : vec4<f32>,
 };
 
 struct DistanceConstraint {
@@ -31,8 +32,8 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     // Simulate cloth dynamics using PBD
 
     // 1. Initialize variables
-    let vertex = &vertexBuffer.vertices[vertexIndex];
-    var newPosition : vec3<f32> = vertex.position;
+    let vertex = vertexBuffer.vertices[vertexIndex];
+    var newPosition : vec4<f32> = vertex.position;
 
     // 2. Apply distance constraints
     for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {

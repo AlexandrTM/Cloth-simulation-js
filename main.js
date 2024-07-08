@@ -5,7 +5,20 @@ function generateVertices(width, length, cellSize, vertices, indices) {
             const posX = i * cellSize;
             const posZ = j * cellSize;
 
-            vertices.push(posX, 0.0, posZ, 1, 0.5, 0.5, 0.5, 1);
+            // Calculate invMass: corner vertices have zero invMass
+            const isCorner = (
+             i === 0         && j === 0         ) || 
+            (i === 0         && j === length - 1) ||
+            (i === width - 1 && j === 0         ) || 
+            (i === width - 1 && j === length - 1);
+            const invMass = isCorner ? 0.0 : 1.0;
+
+            vertices.push(
+                posX, 0.0, posZ, 1, // postion
+                0.5, 0.5, 0.5, 1, // color
+                invMass,
+                posX, 0.0, posZ, 1.0  // predicted position
+            );
         }
     }
     // indices
@@ -135,7 +148,7 @@ const init = async () => {
     });
     // #endregion
 
-    // create vertices
+    // create vertices and vertex attribute descriptors
     // #region
     generateVertices(clothWidth, clothLength, clothCellSize, vertices, indices);
     const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
@@ -148,17 +161,27 @@ const init = async () => {
         {
         attributes: [
             {
-            shaderLocation: 0,
-            offset: 0,
-            format: "float32x4",
+                shaderLocation: 0, // position
+                offset: 0,
+                format: "float32x4",
             },
             {
-            shaderLocation: 1,
-            offset: 16,
-            format: "float32x4",
+                shaderLocation: 1, // color
+                offset: 16,
+                format: "float32x4",
+            },
+            {
+                shaderLocation: 2, // inv mass
+                offset: 32,
+                format: "float32",
+            },
+            {
+                shaderLocation: 3, // predicted position
+                offset: 36,
+                format: "float32x4",
             },
         ],
-        arrayStride: 32,
+        arrayStride: 52,
         stepMode: "vertex",
         },
     ];
@@ -183,7 +206,7 @@ const init = async () => {
     vertexBuffer.unmap();
     // #endregion
     
-    // load shaders
+    // load shader
     const shaderModule = device.createShaderModule({
         code: `
 struct Uniforms {
@@ -191,14 +214,14 @@ struct Uniforms {
 };
 
 struct WireframeSettings {
-    width: f32,
-    color: vec4<f32>,
+    width : f32,
+    color : vec4<f32>,
 };
 
 struct VertexOut {
     @builtin(position) position : vec4<f32>,
     @location(0) color : vec4<f32>,
-    @location(1) barycentric: vec3<f32>,
+    @location(1) barycentric : vec3<f32>,
 };
 
 @group(0) @binding(0) 
@@ -214,6 +237,8 @@ var<storage, read> indexBuffer: array<u32>;
 @vertex
 fn vertex_main(@location(0) position: vec4<f32>,
                 @location(1) color: vec4<f32>,
+                @location(2) invMass: f32,
+                @location(3) predictedPosition: vec4<f32>,
                 @builtin(vertex_index) vertexIdx: u32) -> VertexOut {
     var output : VertexOut;
 
@@ -234,7 +259,7 @@ fn vertex_main(@location(0) position: vec4<f32>,
 
 @fragment
 fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
-    //let bary = fragData.barycentric;
+    let bary = fragData.barycentric;
 
     // use smoothstep for anti-aliasing the edges
     //let edgeThreshold = wireframeSettings.width * fwidth(bary);
@@ -319,9 +344,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         fragment: {
         module: shaderModule,
         entryPoint: "fragment_main",
-        targets: [ 
-            { format: presentationFormat }, 
-        ],
+        targets: [ { format: presentationFormat } ],
         },
         primitive: {
         topology: "triangle-list",
@@ -430,7 +453,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     // Simulate cloth dynamics using PBD
 
     // 1. Initialize variables
-    let vertex = &vertexBuffer.vertices[vertexIndex];
+    let vertex = vertexBuffer.vertices[vertexIndex];
     var newPosition : vec3<f32> = vertex.position;
 
     // 2. Apply distance constraints
