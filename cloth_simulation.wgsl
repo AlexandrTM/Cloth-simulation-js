@@ -11,9 +11,9 @@ struct DistanceConstraint {
     restLength : f32,
 };
 
-struct GravitySettings {
+struct GravitySettings { // alignment 16
     gravityEnabled: u32,
-    gravity: vec3<f32>, // alignment 16
+    gravity: vec3<f32>,
 };
 
 struct VertexBuffer {
@@ -30,6 +30,8 @@ var<storage, read_write> vertexBuffer : VertexBuffer;
 var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
 @group(0) @binding(2)
 var<uniform> gravitySettings : GravitySettings;
+@group(0) @binding(3)
+var<uniform> timeSinceLaunch : f32;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {

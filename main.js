@@ -164,8 +164,6 @@ const init = async () => {
     // create vertices and vertex attribute descriptors
     // #region
     generateVertices(clothWidth, clothLength, clothCellSize, vertices, indices);
-    const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
-    const indexBufferSize = indices.length * Uint32Array.BYTES_PER_ELEMENT;
     //console.log(vertices.length / 8);
     //console.log(indices.length);
     //console.log(vertices.byteLength);
@@ -173,26 +171,10 @@ const init = async () => {
     const vertexBuffersDescriptors = [
         {
         attributes: [
-            {
-                shaderLocation: 0, // position
-                offset: 0,
-                format: "float32x4",
-            },
-            {
-                shaderLocation: 1, // color
-                offset: 16,
-                format: "float32x4",
-            },
-            {
-                shaderLocation: 2, // inv mass
-                offset: 32,
-                format: "float32",
-            },
-            {
-                shaderLocation: 3, // predicted position
-                offset: 36,
-                format: "float32x4",
-            },
+            { shaderLocation: 0, offset: 0 , format: "float32x4" }, // position
+            { shaderLocation: 1, offset: 16, format: "float32x4" }, // color
+            { shaderLocation: 2, offset: 32, format: "float32"   }, // inv mass
+            { shaderLocation: 3, offset: 36, format: "float32x4" }, // predicted position
         ],
         arrayStride: 52,
         stepMode: "vertex",
@@ -202,6 +184,9 @@ const init = async () => {
 
     // create vertex and index buffers
     // #region
+    const vertexBufferSize = vertices.length * Float32Array.BYTES_PER_ELEMENT;
+    const indexBufferSize = indices.length * Uint32Array.BYTES_PER_ELEMENT;
+
     const indexBuffer = device.createBuffer({
         size: indexBufferSize,
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
@@ -405,25 +390,33 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         ],
     };
 
-    // gravity settings
+    // gravity settings and time buffer
     // #region
     const gravitySettingsBuffer = device.createBuffer({
-        size: 16, // u32(bool) + vec3<f32>
+        size: 32, // u32(bool) + 12 padding + vec3<f32> + 4 padding
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(gravitySettingsBuffer, 0, 
         new Uint32Array([gravitySettings.gravityEnabled ? 1 : 0]));
-    device.queue.writeBuffer(gravitySettingsBuffer, 4, 
+    device.queue.writeBuffer(gravitySettingsBuffer, 16, 
         new Float32Array(gravitySettings.gravity));
 
     function updateGravitySettingsBuffer() {
         gravitySettings.gravityEnabled = document.getElementById('gravityCheckbox').checked;
-        const gravityArray = new Float32Array([
-            gravitySettings.applyGravity,
-            ...gravitySettings.gravity,
-        ]);
+        const gravityArray = new Float32Array(8); // 32 bytes
+
+        gravityArray[0] = gravitySettings.gravityEnabled ? 1 : 0;
+        gravityArray.set(gravitySettings.gravity, 4);
+
         device.queue.writeBuffer(gravitySettingsBuffer, 0, gravityArray.buffer);
     }
+
+    const timeSinceLaunchBuffer = device.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.UNIFORM,
+    });
+    device.queue.writeBuffer(gravitySettingsBuffer, 0, 
+        new Uint32Array([time]));
     // #endregion
 
     // compute pipeline
@@ -448,9 +441,9 @@ struct DistanceConstraint {
     restLength : f32,
 };
 
-struct GravitySettings {
+struct GravitySettings { // alignment 16
     gravityEnabled: u32,
-    gravity: vec3<f32>, // alignment 16
+    gravity: vec3<f32>,
 };
 
 struct VertexBuffer {
@@ -467,6 +460,8 @@ var<storage, read_write> vertexBuffer : VertexBuffer;
 var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
 @group(0) @binding(2)
 var<uniform> gravitySettings : GravitySettings;
+@group(0) @binding(3)
+var<uniform> timeSinceLaunch : f32;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
@@ -528,6 +523,11 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: 'uniform' },
             },
+            {
+                binding: 3,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: 'uniform' },
+            },
         ]})]
     });
 
@@ -545,6 +545,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             { binding: 0, resource: { buffer: vertexBuffer } },
             { binding: 1, resource: { buffer: distanceConstraintsBuffer } },
             { binding: 2, resource: { buffer: gravitySettingsBuffer } },
+            { binding: 3, resource: { buffer: timeSinceLaunchBuffer } },
         ],
     });
     // #endregion
@@ -553,10 +554,17 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     function frame() {
         time += 0.016;
 
+        const timeSinceLaunchBuffer = device.createBuffer({
+            size: 4,
+            usage: GPUBufferUsage.UNIFORM,
+        });
+        device.queue.writeBuffer(gravitySettingsBuffer, 0, 
+            new Uint32Array([time]));
+
         updateGravitySettingsBuffer();
 
         //simulateCloth(vertices, clothWidth, clothLength, gravity, time);
-        const dispatchSize = Math.ceil(vertices.length / 52 / 64); // Adjust workgroup size as needed
+        const dispatchSize = Math.ceil(vertices.length / 52);
         const computeCommandEncoder = device.createCommandEncoder();
         const computePassEncoder = computeCommandEncoder.beginComputePass();
         computePassEncoder.setPipeline(computePipeline);
