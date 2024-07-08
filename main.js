@@ -442,6 +442,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
+    device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
         new Uint32Array([time]));
 
     function updateTimeBuffer() {
