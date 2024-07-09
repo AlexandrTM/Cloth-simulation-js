@@ -89,7 +89,7 @@ function simulateClothOnHost(vertices, clothWidth, clothLength, gravity, time) {
                 continue;
             }
 
-            //vertices[index + 1] += gravity * 0.016; // Apply gravity to the y-coordinate
+            //vertices[index + 1] += gravity * time; // Apply gravity to the y-coordinate
         }
     }
 }
@@ -165,10 +165,7 @@ const init = async () => {
     // create vertices and vertex attribute descriptors
     // #region
     generateVertices(clothWidth, clothLength, clothCellSize, vertices, indices);
-    //console.log(vertices.length / 8);
-    //console.log(indices.length);
-    //console.log(vertices.byteLength);
-
+    
     const vertexBuffersDescriptors = [
         {
         attributes: [
@@ -204,7 +201,7 @@ const init = async () => {
     new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
     vertexBuffer.unmap();
 
-    function updateVertexBuffer() {
+    function updateVertexBuffer(device) {
         const vertexBuffer = device.createBuffer({
             size: vertexBufferSize,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
@@ -245,10 +242,60 @@ const init = async () => {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    function updateMVPMatrix() {
+    function updateMVPMatrix(device) {
         glMatrix.mat4.multiply(modelViewProjectionMatrix, viewMatrix, modelMatrix);
         glMatrix.mat4.multiply(modelViewProjectionMatrix, projectionMatrix, modelViewProjectionMatrix);
         device.queue.writeBuffer(MVP_uniform_buffer, 0, modelViewProjectionMatrix);
+    }
+    // #endregion
+ 
+    // write wireframeSettings into uniform buffer
+    // #region
+    // Convert data to typed arrays
+    const widthArray = new Float32Array([wireframeSettings.width]);
+    const colorArray = new Float32Array(wireframeSettings.color);
+
+    // Combine into a single typed array
+    const wireframeData = new Float32Array(Math.ceil(Float32Array.BYTES_PER_ELEMENT * (1 + wireframeSettings.color.length) / 16) * 4);
+    wireframeData.set(widthArray, 0);
+    wireframeData.set(colorArray, 4);
+    
+    //console.log(wireframeData.byteLength);
+    //console.log(wireframe_uniform_buffer.size);
+    device.queue.writeBuffer(wireframe_uniform_buffer, 0, wireframeData);
+    // #endregion
+
+    // gravity settings and time buffer
+    // #region
+    const gravitySettingsBuffer = device.createBuffer({
+        size: 32, // u32(bool) + 12 padding + vec3<f32> + 4 padding
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(gravitySettingsBuffer, 0, 
+        new Uint32Array([gravitySettings.gravityEnabled]));
+    device.queue.writeBuffer(gravitySettingsBuffer, 16, 
+        new Float32Array(gravitySettings.gravity));
+
+    function updateGravitySettingsBuffer(device) {
+        gravitySettings.gravityEnabled = document.getElementById('gravityCheckbox').checked;
+        const gravityArray = new Float32Array(8); // 32 bytes
+
+        gravityArray[0] = gravitySettings.gravityEnabled;
+        gravityArray.set(gravitySettings.gravity, 4);
+
+        device.queue.writeBuffer(gravitySettingsBuffer, 0, gravityArray.buffer);
+    }
+
+    const timeSinceLaunchBuffer = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
+        new Uint32Array([time]));
+
+    function updateTimeBuffer(device) {
+        device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
+            new Uint32Array([time]));
     }
     // #endregion
 
@@ -404,60 +451,6 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     };
     // #endregion
 
-    // write wireframeSettings into uniform buffer
-    // #region
-    // Convert data to typed arrays
-    const widthArray = new Float32Array([wireframeSettings.width]);
-    const colorArray = new Float32Array(wireframeSettings.color);
-
-    // Combine into a single typed array
-    const wireframeData = new Float32Array(Math.ceil(Float32Array.BYTES_PER_ELEMENT * (1 + wireframeSettings.color.length) / 16) * 4);
-    wireframeData.set(widthArray, 0);
-    wireframeData.set(colorArray, 4);
-    
-    //console.log(wireframeData.byteLength);
-    //console.log(wireframe_uniform_buffer.size);
-    device.queue.writeBuffer(wireframe_uniform_buffer, 0, wireframeData);
-    // #endregion
-
-    // gravity settings and time buffer
-    // #region
-    const gravitySettingsBuffer = device.createBuffer({
-        size: 32, // u32(bool) + 12 padding + vec3<f32> + 4 padding
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(gravitySettingsBuffer, 0, 
-        new Uint32Array([gravitySettings.gravityEnabled ? 1 : 0]));
-    device.queue.writeBuffer(gravitySettingsBuffer, 16, 
-        new Float32Array(gravitySettings.gravity));
-
-    function updateGravitySettingsBuffer() {
-        gravitySettings.gravityEnabled = document.getElementById('gravityCheckbox').checked;
-        const gravityArray = new Float32Array(8); // 32 bytes
-
-        gravityArray[0] = gravitySettings.gravityEnabled ? 1 : 0;
-        gravityArray.set(gravitySettings.gravity, 4);
-
-        device.queue.writeBuffer(gravitySettingsBuffer, 0, gravityArray.buffer);
-    }
-
-    const timeSinceLaunchBuffer = device.createBuffer({
-        size: 16,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
-        new Uint32Array([time]));
-
-    function updateTimeBuffer() {
-        const timeSinceLaunchBuffer = device.createBuffer({
-            size: 16,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
-        device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
-            new Uint32Array([time]));
-    }
-    // #endregion
-
     // compute pipeline
     // #region
     let distanceConstraintsBuffer = device.createBuffer({
@@ -508,18 +501,19 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
     // Simulate cloth dynamics using PBD
 
+    // vertexBuffer.vertices[vertexIndex].position = vec4<f32>(1.0, 1.0, 1.0, 1.0);
     // Initialize variables
     let vertex = vertexBuffer.vertices[vertexIndex];
     var newPosition : vec4<f32> = vertex.position;
 
     // Apply gravity if enabled
-    // if (gravitySettings.gravityEnabled == 1u && vertex.invMass > 0.0) {
-    //     newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
-    // }
+    if (gravitySettings.gravityEnabled == 1u && vertex.invMass > 0.0) {
+        newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
+    }
 
     // Apply sinusoidal movement to the center vertex
     if (vertexIndex == 50u) {
-        let amplitude = 25.5;
+        let amplitude = 0.5;
         let frequency = 1.0;
 
         let displacement = vec3<f32>(
@@ -534,27 +528,28 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     }
 
     // Apply distance constraints
-    // for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
-    //     let constraint = distanceConstraintsBuffer.constraints[i];
+    for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
+        let constraint = distanceConstraintsBuffer.constraints[i];
         
-    //     if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
-    //         // Resolve indices
-    //         var otherIndex = constraint.vertex2;
-    //         if (vertexIndex == constraint.vertex2) {
-    //             otherIndex = constraint.vertex1;
-    //         }
+        if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
+            // Resolve indices
+            var otherIndex = constraint.vertex2;
+            if (vertexIndex == constraint.vertex2) {
+                otherIndex = constraint.vertex1;
+            }
 
-    //         // Calculate correction based on current positions
-    //         let delta = vertexBuffer.vertices[otherIndex].position - vertex.position;
-    //         let currentDistance = length(delta);
-    //         let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
+            // Calculate correction based on current positions
+            let delta = vertexBuffer.vertices[otherIndex].position - vertex.position;
+            let currentDistance = length(delta);
+            let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
             
-    //         newPosition += correction * vertex.invMass;
-    //     }
-    // }
+            newPosition += correction * vertex.invMass;
+        }
+    }
 
     // Update predicted position
     vertexBuffer.vertices[vertexIndex].position = newPosition;
+    vertexBuffer.vertices[vertexIndex].predictedPosition = newPosition;
 }
         `
     });
@@ -609,11 +604,13 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     function frame() {
         time += 0.016;
 
-        updateTimeBuffer();
-        updateGravitySettingsBuffer();
+        updateTimeBuffer(device);
+        updateGravitySettingsBuffer(device);
+        updateMVPMatrix(device);
+        const vertexBuffer = updateVertexBuffer(device);
         //simulateClothOnHost(vertices, clothWidth, clothLength, -9.8, time)
 
-        const dispatchSize = Math.ceil(vertices.length / 13);
+        const dispatchSize = Math.ceil(vertices.length / 13 / 64);
         const computeCommandEncoder = device.createCommandEncoder();
         const computePassEncoder = computeCommandEncoder.beginComputePass();
         computePassEncoder.setPipeline(computePipeline);
@@ -621,9 +618,6 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         computePassEncoder.dispatchWorkgroups(dispatchSize);
         computePassEncoder.end();
         device.queue.submit([computeCommandEncoder.finish()]);
-
-        updateMVPMatrix();
-        const vertexBuffer = updateVertexBuffer();
 
         renderPassDescriptor.colorAttachments[0].view = context
         .getCurrentTexture().createView();

@@ -39,14 +39,10 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
     // Simulate cloth dynamics using PBD
 
+    // vertexBuffer.vertices[vertexIndex].position = vec4<f32>(1.0, 1.0, 1.0, 1.0);
     // Initialize variables
     let vertex = vertexBuffer.vertices[vertexIndex];
     var newPosition : vec4<f32> = vertex.position;
-
-    // Apply gravity if enabled
-    if (gravitySettings.gravityEnabled == 1u && vertex.invMass > 0.0) {
-        newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
-    }
 
     // Apply sinusoidal movement to the center vertex
     if (vertexIndex == 50u) {
@@ -64,26 +60,36 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         // newPosition.z += displacement.z;
     }
 
-    // Apply distance constraints
-    for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
-        let constraint = distanceConstraintsBuffer.constraints[i];
-        
-        if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
-            // Resolve indices
-            var otherIndex = constraint.vertex2;
-            if (vertexIndex == constraint.vertex2) {
-                otherIndex = constraint.vertex1;
-            }
+    let mu = 0.98; // damping coefficient
+    let d = 1.0; // grid spacing
+    let t = 0.0167; // time step
+    let c = 1; // wave speed
 
-            // Calculate correction based on current positions
-            let delta = vertexBuffer.vertices[otherIndex].position - vertex.position;
-            let currentDistance = length(delta);
-            let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
-            
-            newPosition += correction * vertex.invMass;
+    let f1 = c * c * t * t / (d * d);
+    let f2 = 1.0 / (mu * t + 2.0);
+    let k1 = (4.0 - 8.0 * f1) * f2;
+    let k2 = (mu * t - 2.0) * f2;
+    let k3 = 2.0 * f1 * f2;
+
+    // Swap buffers.
+    let renderBuffer = 1 - renderBuffer;
+
+    // "renderBuffer" current position of the vertices
+    // "1 - renderBuffer" previous position of the vertices
+
+    for (var j = 1u; j < 9; j++) {
+        let crnt = &buffer[renderBuffer][j * 10..];
+        let prev = &mut buffer[1 - renderBuffer][j * 10..];
+
+        for (var i = 1u; i < 9; i++) {
+            prev[i].z = k1 * crnt[i].z + k2 * prev[i].z + k3 * (
+                crnt[i + 1].z + crnt[i - 1].z +
+                crnt[i + 10].z + crnt[i - 10].z
+            );
         }
     }
 
     // Update predicted position
     vertexBuffer.vertices[vertexIndex].predictedPosition = newPosition;
 }
+
