@@ -56,18 +56,20 @@ function generateDistanceConstraints(width, length, vertices) {
             if (i < width - 1) {
                 const restLength = calculateDistance(index, index + length, vertices);
                 constraints.push({ vertex1: index, vertex2: index + length, restLength });
-                // console.log(restLength);
-                // console.log(
-                //     vertices[index * 20], 
+                //console.log(index, index + length);
+                //console.log(restLength);
+                //console.log(
+                //     vertices[index * 20    ], 
                 //     vertices[index * 20 + 1], 
                 //     vertices[index * 20 + 2],
-                //     vertices[(index + length) * 20],
+                //     vertices[(index + length) * 20    ],
                 //     vertices[(index + length) * 20 + 1],
                 //     vertices[(index + length) * 20 + 2],);
             }
             if (j < length - 1) {
                 const restLength = calculateDistance(index, index + 1, vertices);
                 constraints.push({ vertex1: index, vertex2: index + 1, restLength });
+                //console.log(index, index + 1);
                 //console.log(restLength);
             }
         }
@@ -186,7 +188,6 @@ const init = async () => {
 
     // create vertex attribute descriptors
     // #region
-    
     const vertexBuffersDescriptors = [
         {
         attributes: [
@@ -475,17 +476,42 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
 
     // compute pipeline
     // #region
-    let distanceConstraintsBuffer = device.createBuffer({
-        size: distanceConstraints.length * Float32Array.BYTES_PER_ELEMENT, // each distance constraint has 3 floats (vertex1, vertex2, restLength)
+    const distanceConstraintsBufferSize = distanceConstraints.length * Float32Array.BYTES_PER_ELEMENT;
+    const distanceConstraintsBuffer = device.createBuffer({
+        size: distanceConstraintsBufferSize, // each distance constraint has 3 floats (vertex1, vertex2, restLength)
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
+    const buffer = new ArrayBuffer(distanceConstraintsBufferSize);
+    const dataView = new DataView(buffer);
+
+    let offset = 0;
+    //console.log(distanceConstraints.length / 3);
+    for (let i = 0; i < distanceConstraints.length / 3; i++) {
+        const v1         = distanceConstraints[i * 3    ];
+        const v2         = distanceConstraints[i * 3 + 1];
+        const restLength = distanceConstraints[i * 3 + 2];
+
+        //console.log(v1);
+        //console.log(v2);
+        //console.log(restLength);
+
+        dataView.setUint32(offset, v1, true);
+        offset += 4;
+        dataView.setUint32(offset, v2, true);
+        offset += 4;
+        dataView.setFloat32(offset, restLength, true);
+        offset += 4;
+    }
+
+    // Write data to the GPU buffer
+    device.queue.writeBuffer(distanceConstraintsBuffer, 0, new Uint8Array(buffer));
 
     const computeShaderModule = device.createShaderModule({
         code: `
 struct DistanceConstraint {
-    @align(4) v1 : u32,
-    @align(4) v2 : u32,
-    @align(4) restLength : f32,
+    v1 : u32,
+    v2 : u32,
+    restLength : f32,
 };
 
 struct GravitySettings { // alignment 16
@@ -546,10 +572,10 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         // let restLength : f32 = distanceConstraintsBuffer[i].restLength;
 
         // let currentLength : f32 = distance(v1.position, v2.position);
-        // //if (currentLength > 1.0){
-        vertexBuffer[distanceConstraintsBuffer[i].v1].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-        //vertexBuffer[distanceConstraintsBuffer[i].v2].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-        // //}
+        // // if (numConstraints == 180){
+        // vertexBuffer[distanceConstraintsBuffer[i].v1 * 20].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
+        // // }
+        // //vertexBuffer[distanceConstraintsBuffer[i].v2].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
         // let deltaLength : f32 = currentLength - restLength;
         // let correction : f32 = (deltaLength / currentLength) * 0.5;
         // let direction : vec3<f32> = normalize(v2.position - v1.position);
@@ -557,6 +583,9 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         // let correctionVector : vec3<f32> = correction * direction;
         // vertexBuffer[distanceConstraintsBuffer[i].v1].position = v1.position - correctionVector;
         // vertexBuffer[distanceConstraintsBuffer[i].v2].position = v2.position + correctionVector;
+        if (distanceConstraintsBuffer[0].v2 == 10u) {
+            vertexBuffer[i].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
+        }
     }
 }
         `
