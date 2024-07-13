@@ -15,7 +15,7 @@ function generateVertices(width, length, cellSize, vertices, indices) {
 
             vertices.push(
                 posX, 0.0, posZ, 1.0, // postion
-                0.5, 0.5, 0.5, 1.0,   // color
+                i / width, 0.5, j / length, 1.0,   // color
                 mass,                 // mass
                 0.0, 0.0, 0.0,        // *padding*
                 0.0, 0.0, 0.0,        // force
@@ -108,8 +108,6 @@ const init = async () => {
     const clothCellSize = 1.0;
 
     let distanceConstraints = generateDistanceConstraints(clothWidth, clothLength);
-
-    let time = 0;
     
     const gravitySettings = {
         gravityEnabled: true,
@@ -298,12 +296,10 @@ const init = async () => {
         size: 16,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
-        new Uint32Array([time]));
 
-    function updateTimeBuffer(device) {
+    function updateTimeBuffer(timeSinceLaunch) {
         device.queue.writeBuffer(timeSinceLaunchBuffer, 0, 
-            new Uint32Array([time]));
+            new Float32Array([timeSinceLaunch]));
     }
     // #endregion
 
@@ -477,20 +473,16 @@ struct DistanceConstraint {
 };
 
 struct GravitySettings { // alignment 16
-    gravityEnabled: u32,
-    gravity: vec3<f32>,
+    @align(16) gravityEnabled: u32,
+    @align(16) gravity: vec3<f32>,
 };
 
 struct Vertex {
     @align(16) position : vec4<f32>,
     @align(16) color : vec4<f32>,
-    @align(16)  mass : f32,
+    @align(16) mass : f32,
     @align(16) force : vec3<f32>,
     @align(16) velocity : vec3<f32>,
-};
-
-struct VertexBuffer {
-    vertices : array<Vertex>,
 };
 
 struct DistanceConstraintsBuffer {
@@ -511,9 +503,23 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let numVertices = arrayLength(&vertexBuffer);
 
     for (var i = 0u; i < numVertices; i = i + 1u) {
+        // Retrieve the vertex to update
         var vertex = vertexBuffer[i];
-        vertex.color = vec4<f32>(0.0, 1.0, 1.0, 1.0);
-        vertexBuffer[i] = vertex;
+        var newPosition : vec4<f32> = vertex.position;
+        // 0 9 90 99 corner vertices
+        // Apply sinusoidal movement to the center vertex
+        if (i == 0u || i == 9u || i == 90u || i == 99u) {}
+        else if (i == 44u) {
+            let amplitude = 5.0;
+            let frequency = 1.0;
+
+            newPosition.y = amplitude * sin(timeSinceLaunch * frequency);
+        }
+        else {
+        
+        }
+
+        vertexBuffer[i].position = newPosition;
     }
 }
         `
@@ -567,10 +573,15 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     //console.log(vertexBuffer.size);
     //console.log(vertices.length / 20);
     // define render loop
-    function frame() {
-        time += 0.016;
+    let currentTime;
+    let startTime = performance.now();
+    let timeSinceLaunch;
 
-        updateTimeBuffer(device);
+    function frame() {
+        currentTime = performance.now();
+        timeSinceLaunch = (currentTime - startTime) / 1000.0; // Convert to seconds
+
+        updateTimeBuffer(timeSinceLaunch);
         updateGravitySettingsBuffer(device);
         updateMVPMatrix(device);
         // only when simulating on host
