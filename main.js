@@ -11,13 +11,14 @@ function generateVertices(width, length, cellSize, vertices, indices) {
             (i === 0         && j === length - 1) ||
             (i === width - 1 && j === 0         ) || 
             (i === width - 1 && j === length - 1);
-            const invMass = isCorner ? 0.0 : 1.0;
+            const mass = isCorner ? 0.0 : 1.0;
 
             vertices.push(
                 posX, 0.0, posZ, 1,  // postion
                 0.5, 0.5, 0.5, 1,    // color
-                invMass,             // inverse mass
-                posX, 0.0, posZ, 1.0 // predicted position
+                mass,                // mass
+                0.0, 0.0, 0.0,       // force
+                0.0, 0.0, 0.0        // velocity
             );
         }
     }
@@ -57,6 +58,7 @@ function generateDistanceConstraints(width, length) {
             }
         }
     }
+    //console.log(constraints.length);
     
     for (let i = 0; i < constraints.length; i++) {
         const constraint = constraints[i];
@@ -65,6 +67,7 @@ function generateDistanceConstraints(width, length) {
         distanceConstraints[baseIndex + 1] = constraint.vertex2;
         distanceConstraints[baseIndex + 2] = constraint.restLength;
     }
+    //console.log(distanceConstraints.length);
 
     return distanceConstraints;
 }
@@ -72,7 +75,7 @@ function generateDistanceConstraints(width, length) {
 function simulateClothOnHost(vertices, clothWidth, clothLength, gravity, time) {
     for (let i = 0; i < clothWidth; i++) {
         for (let j = 0; j < clothLength; j++) {
-            const index = (i * (clothLength) + j) * 13;
+            const index = (i * (clothLength) + j) * 15;
 
             // fixed cornerns
             if(
@@ -171,10 +174,11 @@ const init = async () => {
         attributes: [
             { shaderLocation: 0, offset: 0 , format: "float32x4" }, // position
             { shaderLocation: 1, offset: 16, format: "float32x4" }, // color
-            { shaderLocation: 2, offset: 32, format: "float32"   }, // inv mass
-            { shaderLocation: 3, offset: 36, format: "float32x4" }, // predicted position
+            { shaderLocation: 2, offset: 32, format: "float32"   }, // mass
+            { shaderLocation: 3, offset: 36, format: "float32x3" }, // force
+            { shaderLocation: 4, offset: 48, format: "float32x3" }, // velocity
         ],
-        arrayStride: 52,
+        arrayStride: 60,
         stepMode: "vertex",
         },
     ];
@@ -195,16 +199,17 @@ const init = async () => {
 
     const vertexBuffer = device.createBuffer({
         size: vertexBufferSize,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         mappedAtCreation: true,
     });
     new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
     vertexBuffer.unmap();
 
+    // only for simulation on host
     function updateVertexBuffer(device) {
         const vertexBuffer = device.createBuffer({
             size: vertexBufferSize,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
             mappedAtCreation: true,
         });
         new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
@@ -311,8 +316,9 @@ struct Uniforms {
 struct Vertex {
     position : vec4<f32>,
     color : vec4<f32>,
-    invMass : f32,
-    predictedPosition : vec4<f32>,
+    mass : f32,
+    force : vec3<f32>,
+    velocity : vec3<f32>,
 };
 
 struct VertexBuffer {
@@ -340,10 +346,11 @@ var<storage, read> vertexBuffer : VertexBuffer;
 var<storage, read> indexBuffer: array<u32>;
 
 @vertex
-fn vertex_main(@location(0) position: vec4<f32>,
+fn vertex_main( @location(0) position: vec4<f32>,
                 @location(1) color: vec4<f32>,
                 @location(2) invMass: f32,
-                @location(3) predictedPosition: vec4<f32>,
+                @location(3) force : vec3<f32>,
+                @location(4) velocity: vec3<f32>,
                 @builtin(vertex_index) vertexIdx: u32) -> VertexOut {
     var output : VertexOut;
 
@@ -454,7 +461,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     // compute pipeline
     // #region
     let distanceConstraintsBuffer = device.createBuffer({
-        size: distanceConstraints.length * Float32Array.BYTES_PER_ELEMENT * 3, // each distance constraint has 3 floats (vertex1, vertex2, restLength)
+        size: distanceConstraints.length * Float32Array.BYTES_PER_ELEMENT, // each distance constraint has 3 floats (vertex1, vertex2, restLength)
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
 
@@ -474,8 +481,9 @@ struct GravitySettings { // alignment 16
 struct Vertex {
     position : vec4<f32>,
     color : vec4<f32>,
-    invMass : f32,
-    predictedPosition : vec4<f32>,
+    mass : f32,
+    force : vec3<f32>,
+    velocity : vec3<f32>,
 };
 
 struct VertexBuffer {
@@ -495,7 +503,7 @@ var<uniform> gravitySettings : GravitySettings;
 @group(0) @binding(3)
 var<uniform> timeSinceLaunch : f32;
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let vertexIndex = global_id.x;
 
@@ -506,50 +514,25 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let vertex = vertexBuffer.vertices[vertexIndex];
     var newPosition : vec4<f32> = vertex.position;
 
-    // Apply gravity if enabled
-    if (gravitySettings.gravityEnabled == 1u && vertex.invMass > 0.0) {
-        newPosition += vec4<f32>(gravitySettings.gravity * vertex.invMass, 1.0);
-    }
 
     // Apply sinusoidal movement to the center vertex
-    if (vertexIndex == 50u) {
-        let amplitude = 0.5;
-        let frequency = 1.0;
+    // if (vertexIndex == 50u) {
+    //     let amplitude = 150.5;
+    //     let frequency = 1.0;
 
-        let displacement = vec3<f32>(
-            amplitude * sin(timeSinceLaunch * frequency),
-            0.0,
-            0.0,
-        );
+    //     let displacement = vec3<f32>(
+    //         amplitude * sin(timeSinceLaunch * frequency),
+    //         0.0,
+    //         0.0,
+    //     );
 
-        newPosition.x += displacement.x;
-        // newPosition.y += displacement.y;
-        // newPosition.z += displacement.z;
-    }
-
-    // Apply distance constraints
-    for (var i = 0u; i < arrayLength(&distanceConstraintsBuffer.constraints); i = i + 1u) {
-        let constraint = distanceConstraintsBuffer.constraints[i];
-        
-        if (vertexIndex == constraint.vertex1 || vertexIndex == constraint.vertex2) {
-            // Resolve indices
-            var otherIndex = constraint.vertex2;
-            if (vertexIndex == constraint.vertex2) {
-                otherIndex = constraint.vertex1;
-            }
-
-            // Calculate correction based on current positions
-            let delta = vertexBuffer.vertices[otherIndex].position - vertex.position;
-            let currentDistance = length(delta);
-            let correction = delta * (1.0 - constraint.restLength / currentDistance) * 0.5;
-            
-            newPosition += correction * vertex.invMass;
-        }
-    }
+    //     newPosition.x += displacement.x;
+    //     // newPosition.y += displacement.y;
+    //     // newPosition.z += displacement.z;
+    // }
 
     // Update predicted position
-    vertexBuffer.vertices[vertexIndex].position = newPosition;
-    vertexBuffer.vertices[vertexIndex].predictedPosition = newPosition;
+    vertexBuffer.vertices[vertexIndex].position = vec4<f32>(1.0 * timeSinceLaunch);
 }
         `
     });
@@ -558,25 +541,25 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     const computePipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [ device.createBindGroupLayout({
         entries: [
-            {
-                binding: 0,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: 'storage', },
+            { 
+                binding: 0, 
+                visibility: GPUShaderStage.COMPUTE, 
+                buffer: { type: 'storage' }
             },
-            {
-                binding: 1,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: 'read-only-storage', },
+            { 
+                binding: 1, 
+                visibility: GPUShaderStage.COMPUTE, 
+                buffer: { type: 'read-only-storage' }
             },
-            {
-                binding: 2,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: 'uniform' },
+            { 
+                binding: 2, 
+                visibility: GPUShaderStage.COMPUTE, 
+                buffer: { type: 'uniform' }
             },
-            {
-                binding: 3,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: 'uniform' },
+            { 
+                binding: 3, 
+                visibility: GPUShaderStage.COMPUTE, 
+                buffer: { type: 'uniform' }
             },
         ]})]
     });
@@ -592,10 +575,10 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     const computeBindGroup = device.createBindGroup({
         layout: computePipeline.getBindGroupLayout(0),
         entries: [
-            { binding: 0, resource: { buffer: vertexBuffer } },
-            { binding: 1, resource: { buffer: distanceConstraintsBuffer } },
-            { binding: 2, resource: { buffer: gravitySettingsBuffer } },
-            { binding: 3, resource: { buffer: timeSinceLaunchBuffer } },
+            { binding: 0, resource: { buffer: vertexBuffer }},
+            { binding: 1, resource: { buffer: distanceConstraintsBuffer }},
+            { binding: 2, resource: { buffer: gravitySettingsBuffer }},
+            { binding: 3, resource: { buffer: timeSinceLaunchBuffer }},
         ],
     });
     // #endregion
@@ -607,31 +590,37 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         updateTimeBuffer(device);
         updateGravitySettingsBuffer(device);
         updateMVPMatrix(device);
-        const vertexBuffer = updateVertexBuffer(device);
+        // only when simulating on host
+        //const vertexBuffer = updateVertexBuffer(device);
         //simulateClothOnHost(vertices, clothWidth, clothLength, -9.8, time)
 
-        const dispatchSize = Math.ceil(vertices.length / 13 / 64);
+        const vertexCount = vertices.length / 15;
+        const dispatchSize = Math.ceil(vertexCount / 128);
         const computeCommandEncoder = device.createCommandEncoder();
         const computePassEncoder = computeCommandEncoder.beginComputePass();
         computePassEncoder.setPipeline(computePipeline);
         computePassEncoder.setBindGroup(0, computeBindGroup);
         computePassEncoder.dispatchWorkgroups(dispatchSize);
         computePassEncoder.end();
-        device.queue.submit([computeCommandEncoder.finish()]);
 
         renderPassDescriptor.colorAttachments[0].view = context
         .getCurrentTexture().createView();
 
-        const commandEncoder = device.createCommandEncoder();
+        const renderCommandEncoder = device.createCommandEncoder();
         const passEncoder =
-        commandEncoder.beginRenderPass(renderPassDescriptor);
+        renderCommandEncoder.beginRenderPass(renderPassDescriptor);
         passEncoder.setPipeline(pipeline);
         passEncoder.setBindGroup(0, uniformBindGroup);
         passEncoder.setVertexBuffer(0, vertexBuffer);
         passEncoder.setIndexBuffer(indexBuffer, "uint32");
         passEncoder.drawIndexed(indices.length, 1, 0, 0, 0);
         passEncoder.end();
-        device.queue.submit([commandEncoder.finish()]);
+
+        const commandBuffers = [
+            computeCommandEncoder.finish(),
+            renderCommandEncoder.finish(),
+        ];
+        device.queue.submit(commandBuffers);
         
         requestAnimationFrame(frame);
     }

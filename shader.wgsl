@@ -5,8 +5,9 @@ struct Uniforms {
 struct Vertex {
     position : vec4<f32>,
     color : vec4<f32>,
-    invMass : f32,
-    predictedPosition : vec4<f32>,
+    mass : f32,
+    force : vec3<f32>,
+    velocity : vec3<f32>,
 };
 
 struct VertexBuffer {
@@ -34,10 +35,11 @@ var<storage, read> vertexBuffer : VertexBuffer;
 var<storage, read> indexBuffer: array<u32>;
 
 @vertex
-fn vertex_main(@location(0) position: vec4<f32>,
+fn vertex_main( @location(0) position: vec4<f32>,
                 @location(1) color: vec4<f32>,
                 @location(2) invMass: f32,
-                @location(3) predictedPosition: vec4<f32>,
+                @location(3) force : vec3<f32>,
+                @location(4) velocity: vec3<f32>,
                 @builtin(vertex_index) vertexIdx: u32) -> VertexOut {
     var output : VertexOut;
 
