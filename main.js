@@ -14,14 +14,15 @@ function generateVertices(width, length, cellSize, vertices, indices) {
             const mass = isCorner ? 0.0 : 1.0;
 
             vertices.push(
-                posX, 0.0, posZ, 1.0, // postion
-                i / width, 0.5, j / length, 1.0,   // color
-                mass,                 // mass
-                0.0, 0.0, 0.0,        // *padding*
-                0.0, 0.0, 0.0,        // force
-                0.0,                  // *padding*
-                0.0, 0.0, 0.0,        // velocity
-                0.0,                  // *padding*
+                posX, 0.0, posZ,                 // postion
+                0.0,                             // *padding*
+                i / width, 0.5, j / length, 1.0, // color
+                mass,                            // mass
+                0.0, 0.0, 0.0,                   // *padding*
+                0.0, 0.0, 0.0,                   // force
+                0.0,                             // *padding*
+                0.0, 0.0, 0.0,                   // velocity
+                0.0,                             // *padding*
             );
         }
     }
@@ -45,19 +46,29 @@ function generateVertices(width, length, cellSize, vertices, indices) {
     //console.log(vertices.length / 20);
 }
 
-function generateDistanceConstraints(width, length) {
+function generateDistanceConstraints(width, length, vertices) {
     const constraints = [];
     const distanceConstraints = [];
-    const restLength = 1.0; // adjust based on the spacing between vertices
 
     for (let i = 0; i < width; i++) {
         for (let j = 0; j < length; j++) {
             const index = i * length + j;
             if (i < width - 1) {
+                const restLength = calculateDistance(index, index + length, vertices);
                 constraints.push({ vertex1: index, vertex2: index + length, restLength });
+                // console.log(restLength);
+                // console.log(
+                //     vertices[index * 20], 
+                //     vertices[index * 20 + 1], 
+                //     vertices[index * 20 + 2],
+                //     vertices[(index + length) * 20],
+                //     vertices[(index + length) * 20 + 1],
+                //     vertices[(index + length) * 20 + 2],);
             }
             if (j < length - 1) {
+                const restLength = calculateDistance(index, index + 1, vertices);
                 constraints.push({ vertex1: index, vertex2: index + 1, restLength });
+                //console.log(restLength);
             }
         }
     }
@@ -65,14 +76,20 @@ function generateDistanceConstraints(width, length) {
     
     for (let i = 0; i < constraints.length; i++) {
         const constraint = constraints[i];
-        const baseIndex = i * 3;
-        distanceConstraints[baseIndex    ] = constraint.vertex1;
-        distanceConstraints[baseIndex + 1] = constraint.vertex2;
-        distanceConstraints[baseIndex + 2] = constraint.restLength;
+        distanceConstraints.push(constraint.vertex1);
+        distanceConstraints.push(constraint.vertex2);
+        distanceConstraints.push(constraint.restLength);
     }
     //console.log(distanceConstraints.length);
 
     return distanceConstraints;
+}
+
+function calculateDistance(v1, v2, vertices) {
+    return Math.sqrt(
+        (vertices[v1 * 20    ] - vertices[v2 * 20    ]) ** 2 + 
+        (vertices[v1 * 20 + 1] - vertices[v2 * 20 + 1]) ** 2 + 
+        (vertices[v1 * 20 + 2] - vertices[v2 * 20 + 2]) ** 2);
 }
 
 function simulateClothOnHost(vertices, clothWidth, clothLength, gravity, time) {
@@ -106,8 +123,9 @@ const init = async () => {
     const clothWidth = 10;
     const clothLength = 10;
     const clothCellSize = 1.0;
-
-    let distanceConstraints = generateDistanceConstraints(clothWidth, clothLength);
+    
+    generateVertices(clothWidth, clothLength, clothCellSize, vertices, indices);
+    let distanceConstraints = generateDistanceConstraints(clothWidth, clothLength, vertices);
     
     const gravitySettings = {
         gravityEnabled: true,
@@ -166,14 +184,13 @@ const init = async () => {
     });
     // #endregion
 
-    // create vertices and vertex attribute descriptors
+    // create vertex attribute descriptors
     // #region
-    generateVertices(clothWidth, clothLength, clothCellSize, vertices, indices);
     
     const vertexBuffersDescriptors = [
         {
         attributes: [
-            { shaderLocation: 0, offset: 0 , format: "float32x4" }, // position
+            { shaderLocation: 0, offset: 0 , format: "float32x3" }, // position
             { shaderLocation: 1, offset: 16, format: "float32x4" }, // color
             { shaderLocation: 2, offset: 32, format: "float32"   }, // mass
             { shaderLocation: 3, offset: 48, format: "float32x3" }, // force
@@ -284,12 +301,11 @@ const init = async () => {
 
     function updateGravitySettingsBuffer(device) {
         gravitySettings.gravityEnabled = document.getElementById('gravityCheckbox').checked;
-        const gravityArray = new Float32Array(8); // 32 bytes
 
-        gravityArray[0] = gravitySettings.gravityEnabled;
-        gravityArray.set(gravitySettings.gravity, 4);
-
-        device.queue.writeBuffer(gravitySettingsBuffer, 0, gravityArray.buffer);
+        device.queue.writeBuffer(gravitySettingsBuffer, 0, 
+            new Uint32Array([gravitySettings.gravityEnabled]));
+        device.queue.writeBuffer(gravitySettingsBuffer, 16, 
+            new Float32Array(gravitySettings.gravity));
     }
 
     const timeSinceLaunchBuffer = device.createBuffer({
@@ -313,7 +329,7 @@ struct Uniforms {
 };
 
 struct Vertex {
-    position : vec4<f32>,
+    position : vec3<f32>,
     color : vec4<f32>,
     mass : f32,
     force : vec3<f32>,
@@ -345,7 +361,7 @@ var<storage, read> vertexBuffer : VertexBuffer;
 var<storage, read> indexBuffer: array<u32>;
 
 @vertex
-fn vertex_main( @location(0) position: vec4<f32>,
+fn vertex_main( @location(0) position: vec3<f32>,
                 @location(1) color: vec4<f32>,
                 @location(2) mass: f32,
                 @location(3) force : vec3<f32>,
@@ -355,7 +371,7 @@ fn vertex_main( @location(0) position: vec4<f32>,
 
     let index = indexBuffer[vertexIdx];
     //let vertexPos = vec4<f32>(vertexBuffer[index * 8u], vertexBuffer[index * 8u + 1u], vertexBuffer[index * 8u + 2u], 1.0);
-    output.position = uniforms.modelViewProjection * position;
+    output.position = uniforms.modelViewProjection * vec4<f32>(position, 1.0);
 
     // Assign barycentric coordinates based on the vertex index in the triangle
     let vertNdx = vertexIdx % 3u;
@@ -467,9 +483,9 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     const computeShaderModule = device.createShaderModule({
         code: `
 struct DistanceConstraint {
-    vertex1 : u32,
-    vertex2 : u32,
-    restLength : f32,
+    @align(4) v1 : u32,
+    @align(4) v2 : u32,
+    @align(4) restLength : f32,
 };
 
 struct GravitySettings { // alignment 16
@@ -478,21 +494,17 @@ struct GravitySettings { // alignment 16
 };
 
 struct Vertex {
-    @align(16) position : vec4<f32>,
+    @align(16) position : vec3<f32>,
     @align(16) color : vec4<f32>,
     @align(16) mass : f32,
     @align(16) force : vec3<f32>,
     @align(16) velocity : vec3<f32>,
 };
 
-struct DistanceConstraintsBuffer {
-    constraints : array<DistanceConstraint>,
-};
-
 @group(0) @binding(0)
 var<storage, read_write> vertexBuffer : array<Vertex>;
 @group(0) @binding(1)
-var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
+var<storage, read> distanceConstraintsBuffer : array<DistanceConstraint>;
 @group(0) @binding(2)
 var<uniform> gravitySettings : GravitySettings;
 @group(0) @binding(3)
@@ -501,11 +513,13 @@ var<uniform> timeSinceLaunch : f32;
 @compute @workgroup_size(1)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let numVertices = arrayLength(&vertexBuffer);
+    let numConstraints = arrayLength(&distanceConstraintsBuffer);
+    let time_step = 0.01;
 
     for (var i = 0u; i < numVertices; i = i + 1u) {
         // Retrieve the vertex to update
         var vertex = vertexBuffer[i];
-        var newPosition : vec4<f32> = vertex.position;
+        var newPosition : vec3<f32> = vertex.position;
         // 0 9 90 99 corner vertices
         // Apply sinusoidal movement to the center vertex
         if (i == 0u || i == 9u || i == 90u || i == 99u) {}
@@ -513,13 +527,36 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             let amplitude = 5.0;
             let frequency = 1.0;
 
-            newPosition.y = amplitude * sin(timeSinceLaunch * frequency);
+            vertex.position.y = amplitude * sin(timeSinceLaunch * frequency);
         }
         else {
-        
+            if (gravitySettings.gravityEnabled == 1u) {
+                vertex.force = vertex.force + gravitySettings.gravity * vertex.mass;
+                vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
+                vertex.position = vertex.position + vertex.velocity * time_step;
+            }
         }
 
-        vertexBuffer[i].position = newPosition;
+        vertexBuffer[i] = vertex;
+    }
+
+    for (var i = 0u; i < numConstraints; i = i + 1u) {
+        // let v1 : Vertex = vertexBuffer[distanceConstraintsBuffer[i].v1];
+        // let v2 : Vertex = vertexBuffer[distanceConstraintsBuffer[i].v2]; 
+        // let restLength : f32 = distanceConstraintsBuffer[i].restLength;
+
+        // let currentLength : f32 = distance(v1.position, v2.position);
+        // //if (currentLength > 1.0){
+        vertexBuffer[distanceConstraintsBuffer[i].v1].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
+        //vertexBuffer[distanceConstraintsBuffer[i].v2].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
+        // //}
+        // let deltaLength : f32 = currentLength - restLength;
+        // let correction : f32 = (deltaLength / currentLength) * 0.5;
+        // let direction : vec3<f32> = normalize(v2.position - v1.position);
+        
+        // let correctionVector : vec3<f32> = correction * direction;
+        // vertexBuffer[distanceConstraintsBuffer[i].v1].position = v1.position - correctionVector;
+        // vertexBuffer[distanceConstraintsBuffer[i].v2].position = v2.position + correctionVector;
     }
 }
         `
@@ -580,6 +617,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     function frame() {
         currentTime = performance.now();
         timeSinceLaunch = (currentTime - startTime) / 1000.0; // Convert to seconds
+        //console.log(gravitySettings.gravityEnabled);
 
         updateTimeBuffer(timeSinceLaunch);
         updateGravitySettingsBuffer(device);

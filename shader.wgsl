@@ -3,7 +3,7 @@ struct Uniforms {
 };
 
 struct Vertex {
-    position : vec4<f32>,
+    position : vec3<f32>,
     color : vec4<f32>,
     mass : f32,
     force : vec3<f32>,
@@ -35,7 +35,7 @@ var<storage, read> vertexBuffer : VertexBuffer;
 var<storage, read> indexBuffer: array<u32>;
 
 @vertex
-fn vertex_main( @location(0) position: vec4<f32>,
+fn vertex_main( @location(0) position: vec3<f32>,
                 @location(1) color: vec4<f32>,
                 @location(2) mass: f32,
                 @location(3) force : vec3<f32>,
@@ -45,7 +45,7 @@ fn vertex_main( @location(0) position: vec4<f32>,
 
     let index = indexBuffer[vertexIdx];
     //let vertexPos = vec4<f32>(vertexBuffer[index * 8u], vertexBuffer[index * 8u + 1u], vertexBuffer[index * 8u + 2u], 1.0);
-    output.position = uniforms.modelViewProjection * position;
+    output.position = uniforms.modelViewProjection * vec4<f32>(position, 1.0);
 
     // Assign barycentric coordinates based on the vertex index in the triangle
     let vertNdx = vertexIdx % 3u;
