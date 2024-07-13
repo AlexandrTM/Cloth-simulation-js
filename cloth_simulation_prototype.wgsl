@@ -10,11 +10,11 @@ struct GravitySettings { // alignment 16
 };
 
 struct Vertex {
-    position : vec4<f32>,
-    color : vec4<f32>,
-    mass : f32,
-    force : vec3<f32>,
-    velocity : vec3<f32>,
+    @align(16) position : vec4<f32>,
+    @align(16) color : vec4<f32>,
+    @align(16)  mass : f32,
+    @align(16) force : vec3<f32>,
+    @align(16) velocity : vec3<f32>,
 };
 
 struct VertexBuffer {
@@ -38,24 +38,28 @@ var<uniform> timeSinceLaunch : f32;
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let vertexIndex = global_id.x;
 
-    // Simulate cloth dynamics using PBD
+    // Each workgroup processes multiple vertices
+    let numVertices = arrayLength(&vertexBuffer.vertices);
 
-    // vertexBuffer.vertices[vertexIndex].position = vec4<f32>(1.0, 1.0, 1.0, 1.0);
+    for (var i = 0u; i < numVertices; i = i + 1u) {
+        // Retrieve the vertex to update
+        var vertex = vertexBuffer.vertices[i];
+        var newPosition : vec4<f32> = vertex.position;
 
-    // Apply sinusoidal movement to the center vertex
-    if (vertexIndex == 50u) {
-        let amplitude = 0.5;
-        let frequency = 1.0;
+        // Apply sinusoidal movement to the center vertex (example for vertexIndex 50u)
+        if (i == 50u) {
+            let amplitude = 150.5;
+            let frequency = 1.0;
 
-        let displacement = vec3<f32>(
-            amplitude * sin(timeSinceLaunch * frequency),
-            0.0,
-            0.0,
-        );
+            let displacement = vec3<f32>(
+                amplitude * sin(timeSinceLaunch * frequency),
+                0.0,
+                0.0,
+            );
 
-        vertexBuffer.vertices[vertexIndex].position.x += displacement.x;
-        // vertexBuffer.vertices[vertexIndex].position.y += displacement.y;
-        // vertexBuffer.vertices[vertexIndex].position.z += displacement.z;
+            newPosition.x += displacement.x;
+        }
+
+        vertexBuffer.vertices[i].position = newPosition;
     }
 }
-

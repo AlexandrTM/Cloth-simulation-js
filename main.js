@@ -14,11 +14,14 @@ function generateVertices(width, length, cellSize, vertices, indices) {
             const mass = isCorner ? 0.0 : 1.0;
 
             vertices.push(
-                posX, 0.0, posZ, 1,  // postion
-                0.5, 0.5, 0.5, 1,    // color
-                mass,                // mass
-                0.0, 0.0, 0.0,       // force
-                0.0, 0.0, 0.0        // velocity
+                posX, 0.0, posZ, 1.0, // postion
+                0.5, 0.5, 0.5, 1.0,   // color
+                mass,                 // mass
+                0.0, 0.0, 0.0,        // *padding*
+                0.0, 0.0, 0.0,        // force
+                0.0,                  // *padding*
+                0.0, 0.0, 0.0,        // velocity
+                0.0,                  // *padding*
             );
         }
     }
@@ -39,7 +42,7 @@ function generateVertices(width, length, cellSize, vertices, indices) {
     }
     //console.log(Math.max( ...indices ));
     //console.log(vertices.length);
-    //console.log(vertices.length / 13);
+    //console.log(vertices.length / 20);
 }
 
 function generateDistanceConstraints(width, length) {
@@ -75,7 +78,7 @@ function generateDistanceConstraints(width, length) {
 function simulateClothOnHost(vertices, clothWidth, clothLength, gravity, time) {
     for (let i = 0; i < clothWidth; i++) {
         for (let j = 0; j < clothLength; j++) {
-            const index = (i * (clothLength) + j) * 15;
+            const index = (i * (clothLength) + j) * 20;
 
             // fixed cornerns
             if(
@@ -175,10 +178,10 @@ const init = async () => {
             { shaderLocation: 0, offset: 0 , format: "float32x4" }, // position
             { shaderLocation: 1, offset: 16, format: "float32x4" }, // color
             { shaderLocation: 2, offset: 32, format: "float32"   }, // mass
-            { shaderLocation: 3, offset: 36, format: "float32x3" }, // force
-            { shaderLocation: 4, offset: 48, format: "float32x3" }, // velocity
+            { shaderLocation: 3, offset: 48, format: "float32x3" }, // force
+            { shaderLocation: 4, offset: 64, format: "float32x3" }, // velocity
         ],
-        arrayStride: 60,
+        arrayStride: 80,
         stepMode: "vertex",
         },
     ];
@@ -348,7 +351,7 @@ var<storage, read> indexBuffer: array<u32>;
 @vertex
 fn vertex_main( @location(0) position: vec4<f32>,
                 @location(1) color: vec4<f32>,
-                @location(2) invMass: f32,
+                @location(2) mass: f32,
                 @location(3) force : vec3<f32>,
                 @location(4) velocity: vec3<f32>,
                 @builtin(vertex_index) vertexIdx: u32) -> VertexOut {
@@ -479,11 +482,11 @@ struct GravitySettings { // alignment 16
 };
 
 struct Vertex {
-    position : vec4<f32>,
-    color : vec4<f32>,
-    mass : f32,
-    force : vec3<f32>,
-    velocity : vec3<f32>,
+    @align(16) position : vec4<f32>,
+    @align(16) color : vec4<f32>,
+    @align(16)  mass : f32,
+    @align(16) force : vec3<f32>,
+    @align(16) velocity : vec3<f32>,
 };
 
 struct VertexBuffer {
@@ -495,7 +498,7 @@ struct DistanceConstraintsBuffer {
 };
 
 @group(0) @binding(0)
-var<storage, read_write> vertexBuffer : VertexBuffer;
+var<storage, read_write> vertexBuffer : array<Vertex>;
 @group(0) @binding(1)
 var<storage, read> distanceConstraintsBuffer : DistanceConstraintsBuffer;
 @group(0) @binding(2)
@@ -503,36 +506,15 @@ var<uniform> gravitySettings : GravitySettings;
 @group(0) @binding(3)
 var<uniform> timeSinceLaunch : f32;
 
-@compute @workgroup_size(128)
+@compute @workgroup_size(1)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
-    let vertexIndex = global_id.x;
+    let numVertices = arrayLength(&vertexBuffer);
 
-    // Simulate cloth dynamics using PBD
-
-    // vertexBuffer.vertices[vertexIndex].position = vec4<f32>(1.0, 1.0, 1.0, 1.0);
-    // Initialize variables
-    let vertex = vertexBuffer.vertices[vertexIndex];
-    var newPosition : vec4<f32> = vertex.position;
-
-
-    // Apply sinusoidal movement to the center vertex
-    // if (vertexIndex == 50u) {
-    //     let amplitude = 150.5;
-    //     let frequency = 1.0;
-
-    //     let displacement = vec3<f32>(
-    //         amplitude * sin(timeSinceLaunch * frequency),
-    //         0.0,
-    //         0.0,
-    //     );
-
-    //     newPosition.x += displacement.x;
-    //     // newPosition.y += displacement.y;
-    //     // newPosition.z += displacement.z;
-    // }
-
-    // Update predicted position
-    vertexBuffer.vertices[vertexIndex].position = vec4<f32>(1.0 * timeSinceLaunch);
+    for (var i = 0u; i < numVertices; i = i + 1u) {
+        var vertex = vertexBuffer[i];
+        vertex.color = vec4<f32>(0.0, 1.0, 1.0, 1.0);
+        vertexBuffer[i] = vertex;
+    }
 }
         `
     });
@@ -582,7 +564,8 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         ],
     });
     // #endregion
-
+    //console.log(vertexBuffer.size);
+    //console.log(vertices.length / 20);
     // define render loop
     function frame() {
         time += 0.016;
@@ -594,13 +577,15 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         //const vertexBuffer = updateVertexBuffer(device);
         //simulateClothOnHost(vertices, clothWidth, clothLength, -9.8, time)
 
-        const vertexCount = vertices.length / 15;
-        const dispatchSize = Math.ceil(vertexCount / 128);
+        const vertexCount = vertices.length / 20;
+        const dispatchSize = Math.ceil(vertexCount);
+        //console.log(vertexCount);
+        //console.log(dispatchSize);
         const computeCommandEncoder = device.createCommandEncoder();
         const computePassEncoder = computeCommandEncoder.beginComputePass();
         computePassEncoder.setPipeline(computePipeline);
         computePassEncoder.setBindGroup(0, computeBindGroup);
-        computePassEncoder.dispatchWorkgroups(dispatchSize);
+        computePassEncoder.dispatchWorkgroups(1);
         computePassEncoder.end();
 
         renderPassDescriptor.colorAttachments[0].view = context
