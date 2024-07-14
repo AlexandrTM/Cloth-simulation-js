@@ -16,7 +16,10 @@ function generateVertices(width, length, cellSize, vertices, indices) {
             vertices.push(
                 posX, 0.0, posZ,                 // postion
                 0.0,                             // *padding*
-                i / width, 0.5, j / length, 1.0, // color
+                i / width / 1.5,                 // r *color*
+                0.2,                             // g
+                j / length / 1.5,                // b
+                1.0,                             // a
                 mass,                            // mass
                 0.0, 0.0, 0.0,                   // *padding*
                 0.0, 0.0, 0.0,                   // force
@@ -71,6 +74,18 @@ function generateDistanceConstraints(width, length, vertices) {
                 constraints.push({ vertex1: index, vertex2: index + 1, restLength });
                 //console.log(index, index + 1);
                 //console.log(restLength);
+            }
+
+            // Diagonal constraint (bottom-right)
+            if (i < width - 1 && j < length - 1) {
+                const restLength = calculateDistance(index, index + length + 1, vertices);
+                constraints.push({ vertex1: index, vertex2: index + length + 1, restLength });
+            }
+
+            // Diagonal constraint (bottom-left)
+            if (i < width - 1 && j > 0) {
+                const restLength = calculateDistance(index, index + length - 1, vertices);
+                constraints.push({ vertex1: index, vertex2: index + length - 1, restLength });
             }
         }
     }
@@ -595,8 +610,10 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let numConstraints = arrayLength(&distanceConstraints);
 
     let time_step = 0.01;
-    let stiffness = 1.0;
+    let stiffness = 0.8;
     let damping = 0.98;
+    let elasticity = 0.0;
+
     let wind: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
 
     let amplitude = 5.0;
@@ -627,6 +644,13 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             vertex.velocity = vertex.velocity * damping;
             vertex.position = vertex.position + vertex.velocity * time_step;
         }
+        // Apply wave motion to all non-corner vertices
+        // let amplitude = 0.5;
+        // let frequency = 1.0;
+        // let waveMotionX = amplitude * sin(frequency * timeSinceLaunch + initialPosition.x);
+        // let waveMotionY = amplitude * cos(frequency * timeSinceLaunch + initialPosition.y);
+        // vertex.position.z = initialPosition.z + waveMotionX + waveMotionY;
+
         vertices[i] = vertex;
     }
     
@@ -649,16 +673,19 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
             let currentLength : f32 = distance(v1.position, v2.position);
             let deltaLength : f32 = currentLength - restLength;
-            let correction : f32 = (deltaLength / currentLength) * 0.5 * stiffness;
+            let correction : f32 = (deltaLength / restLength) * 0.5 * stiffness;
             let direction : vec3<f32> = normalize(v2.position - v1.position);
             
             let correctionVector : vec3<f32> = correction * direction;
+
+            // Apply the elasticity force
+            let elasticityForce : vec3<f32> = elasticity * correctionVector;
             
             if (!is_corner_vertex(v1_indx) && !is_center_vertex(v1_indx)) {
-                vertices[v1_indx].position = v1.position + correctionVector;
+                vertices[v1_indx].position = v1.position + correctionVector - elasticityForce;
             }
             if (!is_corner_vertex(v2_indx) && !is_center_vertex(v2_indx)) {
-                vertices[v2_indx].position = v2.position - correctionVector;
+                vertices[v2_indx].position = v2.position - correctionVector + elasticityForce;
             }
         }
     }

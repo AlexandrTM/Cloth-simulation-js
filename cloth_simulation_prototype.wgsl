@@ -58,54 +58,62 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let numConstraints = arrayLength(&distanceConstraints);
 
     let time_step = 0.01;
-    let stiffness = 2.0;
-    let damping = 0.1;
-    let wind: vec3<f32> = vec3<f32>(3.0, 9.5, 0.0);
+    let stiffness = 1.0;
+    let damping = 0.98;
+    let elasticity = -1.0;
 
-    let amplitude = 4.0;
+    let wind: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+
+    let amplitude = 5.0;
     let frequency = 3.0;
 
-    //for (var j = 0u; j < 5u; j = j + 1u) {
-        if (i < numVertices) {
-        //for (var i = 0u; i < numVertices; i = i + 1u) {
-            // Retrieve the vertex to update
-            var vertex = vertices[i];
-            let initialPosition : vec3<f32> = vec3<f32>(
-                initialPositions[i].x, 
-                initialPositions[i].y, 
-                initialPositions[i].z);
+    if (i < numVertices) {
+    //for (var i = 0u; i < numVertices; i = i + 1u) {
+        // retrieve the vertex to update
+        var vertex = vertices[i];
+        vertex.force = vec3<f32>(0.0, 0.0, 0.0);
 
-            // Apply sinusoidal movement to the center vertex
-            if (is_corner_vertex(i)) {}
-            else if (is_center_vertex(i)) {
+        let initialPosition : vec3<f32> = vec3<f32>(
+            initialPositions[i].x, 
+            initialPositions[i].y, 
+            initialPositions[i].z);
 
-                vertex.position.y = initialPosition.y + amplitude * sin(timeSinceLaunch * frequency);
-            }
-            else {
-                if (gravitySettings.gravityEnabled == 1u) {
-                    vertex.force = vertex.force + gravitySettings.gravity * vertex.mass;
-                    vertex.force = vertex.force + wind;
-                    vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
-                    vertex.position = vertex.position + vertex.velocity * time_step;
-                }
-                // Apply damping
-                vertex.velocity = vertex.velocity * (1.0 - damping);
-            }
-
-            vertices[i] = vertex;
+        // apply sinusoidal movement to the center vertex
+        if (is_corner_vertex(i)) {}
+        else if (is_center_vertex(i)) {
+            vertex.position.y = initialPosition.y + amplitude * sin(timeSinceLaunch * frequency);
         }
+        else {
+            if (gravitySettings.gravityEnabled == 1u) {
+                vertex.force += gravitySettings.gravity * vertex.mass;
+                vertex.force += wind;
+            }
+            vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
+            vertex.velocity = vertex.velocity * damping;
+            vertex.position = vertex.position + vertex.velocity * time_step;
+        }
+        // apply wave motion to all non-corner vertices
+        // let amplitude = 0.5;
+        // let frequency = 1.0;
+        // let waveMotionX = amplitude * sin(frequency * timeSinceLaunch + initialPosition.x);
+        // let waveMotionY = amplitude * cos(frequency * timeSinceLaunch + initialPosition.y);
+        // vertex.position.z = initialPosition.z + waveMotionX + waveMotionY;
 
+        vertices[i] = vertex;
+    }
+    
+    for (var j = 0u; j < 10u; j = j + 1u) {
         for (var i = 0u; i < numConstraints; i = i + 1u) {
             let v1_indx = distanceConstraints[i].v1;
             let v2_indx = distanceConstraints[i].v2;
-            let v1_in_pos : vec3<f32> = vec3<f32>(
-                initialPositions[v1_indx].x, 
-                initialPositions[v1_indx].y, 
-                initialPositions[v1_indx].z);
-            let v2_in_pos : vec3<f32> = vec3<f32>(
-                initialPositions[v2_indx].x, 
-                initialPositions[v2_indx].y, 
-                initialPositions[v2_indx].z);
+            // let v1_in_pos : vec3<f32> = vec3<f32>(
+            //     initialPositions[v1_indx].x, 
+            //     initialPositions[v1_indx].y, 
+            //     initialPositions[v1_indx].z);
+            // let v2_in_pos : vec3<f32> = vec3<f32>(
+            //     initialPositions[v2_indx].x, 
+            //     initialPositions[v2_indx].y, 
+            //     initialPositions[v2_indx].z);
 
             let v1 : Vertex = vertices[v1_indx];
             let v2 : Vertex = vertices[v2_indx]; 
@@ -113,17 +121,20 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
             let currentLength : f32 = distance(v1.position, v2.position);
             let deltaLength : f32 = currentLength - restLength;
-            let correction : f32 = (deltaLength / currentLength) * 0.5 * stiffness;
-            let direction : vec3<f32> = normalize(v2.position - v1.position);
+            let correction : f32 = (deltaLength / restLength) * 0.5 * stiffness;
+            let direction : vec3<f32> = normalize(v2.position - v1.position) * currentLength;
             
             let correctionVector : vec3<f32> = correction * direction;
+
+            // Apply the elasticity force
+            let elasticityForce : vec3<f32> = elasticity * correctionVector;
             
             if (!is_corner_vertex(v1_indx) && !is_center_vertex(v1_indx)) {
-                vertices[v1_indx].position = v1_in_pos + correctionVector;
+                vertices[v1_indx].position = v1.position + correctionVector - elasticityForce;
             }
             if (!is_corner_vertex(v2_indx) && !is_center_vertex(v2_indx)) {
-                vertices[v2_indx].position = v2_in_pos - correctionVector;
+                vertices[v2_indx].position = v2.position - correctionVector + elasticityForce;
             }
         }
-    //}
+    }
 }
