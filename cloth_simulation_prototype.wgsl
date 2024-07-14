@@ -51,14 +51,23 @@ fn is_center_vertex(vertex_index : u32) -> bool {
     return (vertex_index == center_vertex_index);
 }
 
+fn calculateSpringForce(v1 : Vertex, v2 : Vertex, restLength : f32, stiffness : f32) -> vec3<f32> {
+    let currentLength = distance(v1.position, v2.position);
+    let deltaLength = currentLength - restLength;
+    let direction : vec3<f32> = normalize(v2.position - v1.position);
+    let correction : f32 = (deltaLength / currentLength) * 0.5 * stiffness * stiffness;
+    let force : vec3<f32> = correction * direction;
+    return force;
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
-    var i = global_id.x;
+    var idx = global_id.x;
     let numVertices = arrayLength(&vertices);
     let numConstraints = arrayLength(&distanceConstraints);
 
     let time_step = 0.01;
-    let stiffness = 1.0;
+    let stiffness = 40.0;
     let damping = 0.98;
     let elasticity = -1.0;
 
@@ -67,74 +76,47 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let amplitude = 5.0;
     let frequency = 3.0;
 
-    if (i < numVertices) {
-    //for (var i = 0u; i < numVertices; i = i + 1u) {
-        // retrieve the vertex to update
-        var vertex = vertices[i];
-        vertex.force = vec3<f32>(0.0, 0.0, 0.0);
+    if (idx < numVertices) {
+        var vertex = vertices[idx];
+        var totalForce : vec3<f32> = vec3<f32>(0.0);
 
         let initialPosition : vec3<f32> = vec3<f32>(
-            initialPositions[i].x, 
-            initialPositions[i].y, 
-            initialPositions[i].z);
+            initialPositions[idx].x, 
+            initialPositions[idx].y, 
+            initialPositions[idx].z);
 
-        // apply sinusoidal movement to the center vertex
-        if (is_corner_vertex(i)) {}
-        else if (is_center_vertex(i)) {
+        // Accumulate external forces
+        if (is_corner_vertex(idx)) {}
+        else if (is_center_vertex(idx)) {
             vertex.position.y = initialPosition.y + amplitude * sin(timeSinceLaunch * frequency);
         }
         else {
             if (gravitySettings.gravityEnabled == 1u) {
-                vertex.force += gravitySettings.gravity * vertex.mass;
-                vertex.force += wind;
+                totalForce += gravitySettings.gravity * vertex.mass;
             }
-            vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
-            vertex.velocity = vertex.velocity * damping;
-            vertex.position = vertex.position + vertex.velocity * time_step;
+            totalForce += wind;
         }
-        // apply wave motion to all non-corner vertices
-        // let amplitude = 0.5;
-        // let frequency = 1.0;
-        // let waveMotionX = amplitude * sin(frequency * timeSinceLaunch + initialPosition.x);
-        // let waveMotionY = amplitude * cos(frequency * timeSinceLaunch + initialPosition.y);
-        // vertex.position.z = initialPosition.z + waveMotionX + waveMotionY;
 
-        vertices[i] = vertex;
-    }
-    
-    for (var j = 0u; j < 10u; j = j + 1u) {
+        // Apply spring forces from distance constraints
         for (var i = 0u; i < numConstraints; i = i + 1u) {
-            let v1_indx = distanceConstraints[i].v1;
-            let v2_indx = distanceConstraints[i].v2;
-            // let v1_in_pos : vec3<f32> = vec3<f32>(
-            //     initialPositions[v1_indx].x, 
-            //     initialPositions[v1_indx].y, 
-            //     initialPositions[v1_indx].z);
-            // let v2_in_pos : vec3<f32> = vec3<f32>(
-            //     initialPositions[v2_indx].x, 
-            //     initialPositions[v2_indx].y, 
-            //     initialPositions[v2_indx].z);
-
-            let v1 : Vertex = vertices[v1_indx];
-            let v2 : Vertex = vertices[v2_indx]; 
-            let restLength : f32 = distanceConstraints[i].restLength;
-
-            let currentLength : f32 = distance(v1.position, v2.position);
-            let deltaLength : f32 = currentLength - restLength;
-            let correction : f32 = (deltaLength / currentLength) * 0.5 * stiffness;
-            let direction : vec3<f32> = normalize(v2.position - v1.position) * currentLength;
-            
-            let correctionVector : vec3<f32> = correction * direction;
-
-            // Apply the elasticity force
-            let elasticityForce : vec3<f32> = elasticity * correctionVector;
-            
-            if (!is_corner_vertex(v1_indx) && !is_center_vertex(v1_indx)) {
-                vertices[v1_indx].position = v1.position + correctionVector - elasticityForce;
-            }
-            if (!is_corner_vertex(v2_indx) && !is_center_vertex(v2_indx)) {
-                vertices[v2_indx].position = v2.position - correctionVector + elasticityForce;
+            if (distanceConstraints[i].v1 == idx) {
+                let v2 : Vertex = vertices[distanceConstraints[i].v2];
+                let springForce : vec3<f32> = calculateSpringForce(vertex, v2, distanceConstraints[i].restLength, stiffness);
+                totalForce += springForce;
+            } else if (distanceConstraints[i].v2 == idx) {
+                let v1 : Vertex = vertices[distanceConstraints[i].v1];
+                let springForce : vec3<f32> = calculateSpringForce(vertex, v1, distanceConstraints[i].restLength, stiffness);
+                totalForce += springForce;
             }
         }
+
+        // Update velocity and position using Verlet integration
+        vertex.velocity += (totalForce / vertex.mass) * time_step;
+        vertex.velocity *= damping;
+        if (!is_corner_vertex(idx) && !is_center_vertex(idx)) {
+            vertex.position += vertex.velocity * time_step;
+        }
+
+        vertices[idx] = vertex;
     }
 }
