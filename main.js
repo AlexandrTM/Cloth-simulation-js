@@ -56,7 +56,7 @@ function generateDistanceConstraints(width, length, vertices) {
             if (i < width - 1) {
                 const restLength = calculateDistance(index, index + length, vertices);
                 constraints.push({ vertex1: index, vertex2: index + length, restLength });
-                //console.log(index, index + length);
+                console.log(index, index + length);
                 //console.log(restLength);
                 //console.log(
                 //     vertices[index * 20    ], 
@@ -69,7 +69,7 @@ function generateDistanceConstraints(width, length, vertices) {
             if (j < length - 1) {
                 const restLength = calculateDistance(index, index + 1, vertices);
                 constraints.push({ vertex1: index, vertex2: index + 1, restLength });
-                //console.log(index, index + 1);
+                console.log(index, index + 1);
                 //console.log(restLength);
             }
         }
@@ -509,9 +509,9 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     const computeShaderModule = device.createShaderModule({
         code: `
 struct DistanceConstraint {
-    v1 : u32,
-    v2 : u32,
-    restLength : f32,
+    @align(4) v1 : u32,
+    @align(4) v2 : u32,
+    @align(4) restLength : f32,
 };
 
 struct GravitySettings { // alignment 16
@@ -541,50 +541,52 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let numVertices = arrayLength(&vertexBuffer);
     let numConstraints = arrayLength(&distanceConstraintsBuffer);
     let time_step = 0.01;
+    for (var j = 0u; j < 5u; j = j + 1u) {
+        for (var i = 0u; i < numVertices; i = i + 1u) {
+            // Retrieve the vertex to update
+            var vertex = vertexBuffer[i];
+            var newPosition : vec3<f32> = vertex.position;
+            // 0 9 90 99 corner vertices
+            // Apply sinusoidal movement to the center vertex
+            if (i == 0u || i == 9u || i == 90u || i == 99u) {}
+            else if (i == 44u) {
+                let amplitude = 5.0;
+                let frequency = 1.0;
 
-    for (var i = 0u; i < numVertices; i = i + 1u) {
-        // Retrieve the vertex to update
-        var vertex = vertexBuffer[i];
-        var newPosition : vec3<f32> = vertex.position;
-        // 0 9 90 99 corner vertices
-        // Apply sinusoidal movement to the center vertex
-        if (i == 0u || i == 9u || i == 90u || i == 99u) {}
-        else if (i == 44u) {
-            let amplitude = 5.0;
-            let frequency = 1.0;
-
-            vertex.position.y = amplitude * sin(timeSinceLaunch * frequency);
-        }
-        else {
-            if (gravitySettings.gravityEnabled == 1u) {
-                vertex.force = vertex.force + gravitySettings.gravity * vertex.mass;
-                vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
-                vertex.position = vertex.position + vertex.velocity * time_step;
+                vertex.position.y = amplitude * sin(timeSinceLaunch * frequency);
             }
+            else {
+                if (gravitySettings.gravityEnabled == 1u) {
+                    vertex.force = vertex.force + gravitySettings.gravity * vertex.mass;
+                    vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
+                    vertex.position = vertex.position + vertex.velocity * time_step;
+                }
+            }
+
+            vertexBuffer[i] = vertex;
         }
 
-        vertexBuffer[i] = vertex;
-    }
+        for (var i = 0u; i < numConstraints; i = i + 1u) {
+            let v1_indx = distanceConstraintsBuffer[i].v1;
+            let v2_indx = distanceConstraintsBuffer[i].v2;
+            let v1_is_corner = (v1_indx == 0u || v1_indx == 9u || v1_indx == 90u || v1_indx == 99u);
+            let v2_is_corner = (v2_indx == 0u || v2_indx == 9u || v2_indx == 90u || v2_indx == 99u);
+            let v1 : Vertex = vertexBuffer[v1_indx];
+            let v2 : Vertex = vertexBuffer[v2_indx]; 
+            let restLength : f32 = distanceConstraintsBuffer[i].restLength;
 
-    for (var i = 0u; i < numConstraints; i = i + 1u) {
-        // let v1 : Vertex = vertexBuffer[distanceConstraintsBuffer[i].v1];
-        // let v2 : Vertex = vertexBuffer[distanceConstraintsBuffer[i].v2]; 
-        // let restLength : f32 = distanceConstraintsBuffer[i].restLength;
-
-        // let currentLength : f32 = distance(v1.position, v2.position);
-        // // if (numConstraints == 180){
-        // vertexBuffer[distanceConstraintsBuffer[i].v1 * 20].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-        // // }
-        // //vertexBuffer[distanceConstraintsBuffer[i].v2].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-        // let deltaLength : f32 = currentLength - restLength;
-        // let correction : f32 = (deltaLength / currentLength) * 0.5;
-        // let direction : vec3<f32> = normalize(v2.position - v1.position);
-        
-        // let correctionVector : vec3<f32> = correction * direction;
-        // vertexBuffer[distanceConstraintsBuffer[i].v1].position = v1.position - correctionVector;
-        // vertexBuffer[distanceConstraintsBuffer[i].v2].position = v2.position + correctionVector;
-        if (distanceConstraintsBuffer[0].v2 == 10u) {
-            vertexBuffer[i].color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
+            let currentLength : f32 = distance(v1.position, v2.position);
+            let deltaLength : f32 = currentLength - restLength;
+            let correction : f32 = (deltaLength / currentLength) * 0.5;
+            let direction : vec3<f32> = normalize(v2.position - v1.position);
+            
+            let correctionVector : vec3<f32> = correction * direction;
+            if (!v1_is_corner) {
+                vertexBuffer[v1_indx].position = v1.position - correctionVector;
+            }
+            if (!v2_is_corner) {
+                vertexBuffer[v2_indx].position = v2.position + correctionVector;
+            }
         }
     }
 }
