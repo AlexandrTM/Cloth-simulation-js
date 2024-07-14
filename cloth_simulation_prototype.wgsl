@@ -84,12 +84,12 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             else {
                 if (gravitySettings.gravityEnabled == 1u) {
                     vertex.force = vertex.force + gravitySettings.gravity * vertex.mass;
-                    //vertex.force = vertex.force + wind;
+                    vertex.force = vertex.force + wind;
                     vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
                     vertex.position = vertex.position + vertex.velocity * time_step;
                 }
                 // Apply damping
-                //vertex.velocity = vertex.velocity * (1.0 - damping);
+                vertex.velocity = vertex.velocity * (1.0 - damping);
             }
 
             vertices[i] = vertex;
@@ -119,10 +119,10 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             let correctionVector : vec3<f32> = correction * direction;
             
             if (!is_corner_vertex(v1_indx) && !is_center_vertex(v1_indx)) {
-                vertices[v1_indx].position = v1.position + correctionVector;
+                vertices[v1_indx].position = v1_in_pos + correctionVector;
             }
             if (!is_corner_vertex(v2_indx) && !is_center_vertex(v2_indx)) {
-                vertices[v2_indx].position = v2.position - correctionVector;
+                vertices[v2_indx].position = v2_in_pos - correctionVector;
             }
         }
     //}

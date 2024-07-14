@@ -5,13 +5,13 @@ function generateVertices(width, length, cellSize, vertices, indices) {
             const posX = i * cellSize;
             const posZ = j * cellSize;
 
-            // Calculate invMass: corner vertices have zero invMass
+            // Calculate mass: corner vertices have zero mass
             const isCorner = (
              i === 0         && j === 0         ) || 
             (i === 0         && j === length - 1) ||
             (i === width - 1 && j === 0         ) || 
             (i === width - 1 && j === length - 1);
-            const mass = isCorner ? 0.0 : 1.0;
+            const mass = isCorner ? 1.0 : 1.0;
 
             vertices.push(
                 posX, 0.0, posZ,                 // postion
@@ -122,8 +122,8 @@ function simulateClothOnHost(vertices, clothWidth, clothLength, gravity, time) {
 const init = async () => { 
     const vertices = [];
     const indices = [];
-    const clothWidth = 7;
-    const clothLength = 7;
+    const clothWidth = 23;
+    const clothLength = 23;
     const clothCellSize = 1.0;
 
     generateVertices(clothWidth, clothLength, clothCellSize, vertices, indices);
@@ -247,6 +247,7 @@ const init = async () => {
 
     glMatrix.mat4.lookAt(viewMatrix, 
         [clothLength * clothCellSize * 2.15, clothLength * clothCellSize * 1.9, clothLength * clothCellSize * 2.15], 
+        //[clothLength * clothCellSize * 2.15, 0.0, clothLength * clothCellSize * 2.15], 
         [0, 0, 0], 
         [0, 1, 0]
     );
@@ -595,53 +596,52 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
     let time_step = 0.01;
     let stiffness = 1.0;
-    let damping = 0.01;
-    let wind: vec3<f32> = vec3<f32>(3.0, 9.5, 0.0);
+    let damping = 0.98;
+    let wind: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
 
-    let amplitude = 3.0;
-    let frequency = 10.0;
+    let amplitude = 5.0;
+    let frequency = 3.0;
 
-    //for (var j = 0u; j < 5u; j = j + 1u) {
-        if (i < numVertices) {
-        //for (var i = 0u; i < numVertices; i = i + 1u) {
-            // Retrieve the vertex to update
-            var vertex = vertices[i];
-            let initialPosition : vec3<f32> = vec3<f32>(
-                initialPositions[i].x, 
-                initialPositions[i].y, 
-                initialPositions[i].z);
+    if (i < numVertices) {
+    //for (var i = 0u; i < numVertices; i = i + 1u) {
+        // Retrieve the vertex to update
+        var vertex = vertices[i];
+        vertex.force = vec3<f32>(0.0, 0.0, 0.0);
 
-            // Apply sinusoidal movement to the center vertex
-            if (is_corner_vertex(i)) {}
-            else if (is_center_vertex(i)) {
+        let initialPosition : vec3<f32> = vec3<f32>(
+            initialPositions[i].x, 
+            initialPositions[i].y, 
+            initialPositions[i].z);
 
-                vertex.position.y = initialPosition.y + amplitude * sin(timeSinceLaunch * frequency);
-            }
-            else {
-                if (gravitySettings.gravityEnabled == 1u) {
-                    vertex.force = vertex.force + gravitySettings.gravity * vertex.mass;
-                    //vertex.force = vertex.force + wind;
-                    vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
-                    vertex.position = vertex.position + vertex.velocity * time_step;
-                }
-                // Apply damping
-                //vertex.velocity = vertex.velocity * (1.0 - damping);
-            }
-
-            vertices[i] = vertex;
+        // Apply sinusoidal movement to the center vertex
+        if (is_corner_vertex(i)) {}
+        else if (is_center_vertex(i)) {
+            vertex.position.y = initialPosition.y + amplitude * sin(timeSinceLaunch * frequency);
         }
-
+        else {
+            if (gravitySettings.gravityEnabled == 1u) {
+                vertex.force += gravitySettings.gravity * vertex.mass;
+                vertex.force += wind;
+            }
+            vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
+            vertex.velocity = vertex.velocity * damping;
+            vertex.position = vertex.position + vertex.velocity * time_step;
+        }
+        vertices[i] = vertex;
+    }
+    
+    for (var j = 0u; j < 10u; j = j + 1u) {
         for (var i = 0u; i < numConstraints; i = i + 1u) {
             let v1_indx = distanceConstraints[i].v1;
             let v2_indx = distanceConstraints[i].v2;
-            let v1_in_pos : vec3<f32> = vec3<f32>(
-                initialPositions[v1_indx].x, 
-                initialPositions[v1_indx].y, 
-                initialPositions[v1_indx].z);
-            let v2_in_pos : vec3<f32> = vec3<f32>(
-                initialPositions[v2_indx].x, 
-                initialPositions[v2_indx].y, 
-                initialPositions[v2_indx].z);
+            // let v1_in_pos : vec3<f32> = vec3<f32>(
+            //     initialPositions[v1_indx].x, 
+            //     initialPositions[v1_indx].y, 
+            //     initialPositions[v1_indx].z);
+            // let v2_in_pos : vec3<f32> = vec3<f32>(
+            //     initialPositions[v2_indx].x, 
+            //     initialPositions[v2_indx].y, 
+            //     initialPositions[v2_indx].z);
 
             let v1 : Vertex = vertices[v1_indx];
             let v2 : Vertex = vertices[v2_indx]; 
@@ -661,7 +661,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
                 vertices[v2_indx].position = v2.position - correctionVector;
             }
         }
-    //}
+    }
 }
         `
     });
