@@ -122,8 +122,8 @@ function simulateClothOnHost(vertices, clothWidth, clothLength, gravity, time) {
 const init = async () => { 
     const vertices = [];
     const indices = [];
-    const clothWidth = 10;
-    const clothLength = 10;
+    const clothWidth = 7;
+    const clothLength = 7;
     const clothCellSize = 1.0;
 
     generateVertices(clothWidth, clothLength, clothCellSize, vertices, indices);
@@ -526,6 +526,12 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32> {
     device.queue.writeBuffer(distanceConstraintsBuffer, 0, new Uint8Array(buffer));
     // #endregion
 
+    clothSizeBuffer = device.createBuffer({
+        size: 8,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+    });
+    device.queue.writeBuffer(clothSizeBuffer, 0, new Uint32Array([clothWidth, clothLength]));
+
     const computeShaderModule = device.createShaderModule({
         code: `
 struct DistanceConstraint {
@@ -554,73 +560,92 @@ struct Vertex {
 };
 
 @group(0) @binding(0)
-var<storage, read_write> vertexBuffer : array<Vertex>;
+var<storage, read_write> vertices : array<Vertex>;
 @group(0) @binding(1)
-var<storage, read> distanceConstraintsBuffer : array<DistanceConstraint>;
+var<storage, read> distanceConstraints : array<DistanceConstraint>;
 @group(0) @binding(2)
 var<uniform> gravitySettings : GravitySettings;
 @group(0) @binding(3)
 var<uniform> timeSinceLaunch : f32;
 @group(0) @binding(4)
-var<storage, read> initialPositionsBuffer : array<InitialPosition>;
+var<storage, read> initialPositions : array<InitialPosition>;
+@group(0) @binding(5)
+var<storage, read> clothSize : vec2<u32>;
 
-@compute @workgroup_size(128)
+fn is_corner_vertex(vertex_index : u32) -> bool {
+    return (
+        vertex_index == 0u                                 || 
+        vertex_index == (clothSize.x - 1u)                 || 
+        vertex_index == (clothSize.x) * (clothSize.y - 1u) || 
+        vertex_index == (clothSize.x) * (clothSize.y - 1u) + (clothSize.y - 1u));
+}
+
+fn is_center_vertex(vertex_index : u32) -> bool {
+    let center_vertex_index = clothSize.x * 
+                            (u32(ceil(f32(clothSize.y) / 2.0)) - 1u) + 
+                            (u32(ceil(f32(clothSize.y) / 2.0)) - 1u);
+    return (vertex_index == center_vertex_index);
+}
+
+@compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
-    let numVertices = arrayLength(&vertexBuffer);
-    let numConstraints = arrayLength(&distanceConstraintsBuffer);
+    var i = global_id.x;
+    let numVertices = arrayLength(&vertices);
+    let numConstraints = arrayLength(&distanceConstraints);
 
-    let time_step = 0.001;
+    let time_step = 0.01;
     let stiffness = 1.0;
     let damping = 0.01;
+    let wind: vec3<f32> = vec3<f32>(3.0, 9.5, 0.0);
 
-    for (var j = 0u; j < 5u; j = j + 1u) {
-        for (var i = 0u; i < numVertices; i = i + 1u) {
+    let amplitude = 3.0;
+    let frequency = 10.0;
+
+    //for (var j = 0u; j < 5u; j = j + 1u) {
+        if (i < numVertices) {
+        //for (var i = 0u; i < numVertices; i = i + 1u) {
             // Retrieve the vertex to update
-            var vertex = vertexBuffer[i];
+            var vertex = vertices[i];
             let initialPosition : vec3<f32> = vec3<f32>(
-                initialPositionsBuffer[i].x, 
-                initialPositionsBuffer[i].y, 
-                initialPositionsBuffer[i].z);
-            // 0 9 90 99 corner vertices
+                initialPositions[i].x, 
+                initialPositions[i].y, 
+                initialPositions[i].z);
+
             // Apply sinusoidal movement to the center vertex
-            if (i == 0u || i == 9u || i == 90u || i == 99u) {}
-            else if (i == 44u) {
-                let amplitude = 4.0;
-                let frequency = 3.0;
+            if (is_corner_vertex(i)) {}
+            else if (is_center_vertex(i)) {
 
                 vertex.position.y = initialPosition.y + amplitude * sin(timeSinceLaunch * frequency);
             }
             else {
                 if (gravitySettings.gravityEnabled == 1u) {
                     vertex.force = vertex.force + gravitySettings.gravity * vertex.mass;
+                    //vertex.force = vertex.force + wind;
                     vertex.velocity = vertex.velocity + (vertex.force / vertex.mass) * time_step;
-                    vertex.position = initialPosition + vertex.velocity * time_step;
+                    vertex.position = vertex.position + vertex.velocity * time_step;
                 }
-
                 // Apply damping
-                vertex.velocity = vertex.velocity * (1.0 - damping);
+                //vertex.velocity = vertex.velocity * (1.0 - damping);
             }
 
-            vertexBuffer[i] = vertex;
+            vertices[i] = vertex;
         }
 
         for (var i = 0u; i < numConstraints; i = i + 1u) {
-            let v1_indx = distanceConstraintsBuffer[i].v1;
-            let v2_indx = distanceConstraintsBuffer[i].v2;
-            let v1_is_corner = (v1_indx == 0u || v1_indx == 9u || v1_indx == 90u || v1_indx == 99u);
-            let v2_is_corner = (v2_indx == 0u || v2_indx == 9u || v2_indx == 90u || v2_indx == 99u);
+            let v1_indx = distanceConstraints[i].v1;
+            let v2_indx = distanceConstraints[i].v2;
             let v1_in_pos : vec3<f32> = vec3<f32>(
-                initialPositionsBuffer[v1_indx].x, 
-                initialPositionsBuffer[v1_indx].y, 
-                initialPositionsBuffer[v1_indx].z);
+                initialPositions[v1_indx].x, 
+                initialPositions[v1_indx].y, 
+                initialPositions[v1_indx].z);
             let v2_in_pos : vec3<f32> = vec3<f32>(
-                initialPositionsBuffer[v2_indx].x, 
-                initialPositionsBuffer[v2_indx].y, 
-                initialPositionsBuffer[v2_indx].z);
+                initialPositions[v2_indx].x, 
+                initialPositions[v2_indx].y, 
+                initialPositions[v2_indx].z);
 
-            let v1 : Vertex = vertexBuffer[v1_indx];
-            let v2 : Vertex = vertexBuffer[v2_indx]; 
-            let restLength : f32 = distanceConstraintsBuffer[i].restLength;
+            let v1 : Vertex = vertices[v1_indx];
+            let v2 : Vertex = vertices[v2_indx]; 
+            let restLength : f32 = distanceConstraints[i].restLength;
 
             let currentLength : f32 = distance(v1.position, v2.position);
             let deltaLength : f32 = currentLength - restLength;
@@ -629,14 +654,14 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             
             let correctionVector : vec3<f32> = correction * direction;
             
-            if (!v1_is_corner && (v1_indx != 44u)) {
-                vertexBuffer[v1_indx].position = v1.position + correctionVector;
+            if (!is_corner_vertex(v1_indx) && !is_center_vertex(v1_indx)) {
+                vertices[v1_indx].position = v1.position + correctionVector;
             }
-            if (!v2_is_corner && (v2_indx != 44u)) {
-                vertexBuffer[v2_indx].position = v2.position - correctionVector;
+            if (!is_corner_vertex(v2_indx) && !is_center_vertex(v2_indx)) {
+                vertices[v2_indx].position = v2.position - correctionVector;
             }
         }
-    }
+    //}
 }
         `
     });
@@ -670,6 +695,11 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
                 visibility: GPUShaderStage.COMPUTE, 
                 buffer: { type: 'read-only-storage' }
             },
+            { 
+                binding: 5, 
+                visibility: GPUShaderStage.COMPUTE, 
+                buffer: { type: 'read-only-storage' }
+            },
         ]})]
     });
 
@@ -689,6 +719,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
             { binding: 2, resource: { buffer: gravitySettingsBuffer }},
             { binding: 3, resource: { buffer: timeSinceLaunchBuffer }},
             { binding: 4, resource: { buffer: initialPositionsBuffer }},
+            { binding: 5, resource: { buffer: clothSizeBuffer }},
         ],
     });
     // #endregion
@@ -712,7 +743,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         //simulateClothOnHost(vertices, clothWidth, clothLength, -9.8, time)
 
         const vertexCount = vertices.length / 20;
-        const dispatchSize = Math.ceil(vertexCount / 128);
+        const dispatchSize = Math.ceil(vertexCount / 64);
         //console.log(vertexCount);
         //console.log(dispatchSize);
         const computeCommandEncoder = device.createCommandEncoder();
