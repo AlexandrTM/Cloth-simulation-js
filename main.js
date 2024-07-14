@@ -591,15 +591,15 @@ var<storage, read> clothSize : vec2<u32>;
 fn is_corner_vertex(vertex_index : u32) -> bool {
     return (
         vertex_index == 0u                                 || 
-        vertex_index == (clothSize.x - 1u)                 || 
-        vertex_index == (clothSize.x) * (clothSize.y - 1u) || 
-        vertex_index == (clothSize.x) * (clothSize.y - 1u) + (clothSize.y - 1u));
+        vertex_index == (clothSize.y - 1u)                 || 
+        vertex_index == (clothSize.y) * (clothSize.x - 1u) || 
+        vertex_index == (clothSize.x) * (clothSize.y - 1u) + (clothSize.x - 1u));
 }
 
 fn is_center_vertex(vertex_index : u32) -> bool {
     let center_vertex_index = clothSize.x * 
                             (u32(ceil(f32(clothSize.y) / 2.0)) - 1u) + 
-                            (u32(ceil(f32(clothSize.y) / 2.0)) - 1u);
+                            (u32(ceil(f32(clothSize.x) / 2.0)) - 1u);
     return (vertex_index == center_vertex_index);
 }
 
@@ -619,7 +619,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let numConstraints = arrayLength(&distanceConstraints);
 
     let time_step = 0.01;
-    let stiffness = 40.0;
+    let stiffness = 45.0;
     let damping = 0.98;
     let elasticity = -1.0;
 
