@@ -610,14 +610,14 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
     let numConstraints = arrayLength(&distanceConstraints);
 
     let time_step = 0.01;
-    let stiffness = 0.8;
+    let stiffness = 0.01;
     let damping = 0.98;
-    let elasticity = 0.0;
+    let elasticity = -100.0;
 
     let wind: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
 
-    let amplitude = 5.0;
-    let frequency = 3.0;
+    let amplitude = 2.0;
+    let frequency = 5.0;
 
     if (i < numVertices) {
     //for (var i = 0u; i < numVertices; i = i + 1u) {
@@ -673,7 +673,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
             let currentLength : f32 = distance(v1.position, v2.position);
             let deltaLength : f32 = currentLength - restLength;
-            let correction : f32 = (deltaLength / restLength) * 0.5 * stiffness;
+            let correction : f32 = (deltaLength / currentLength) * 0.5 * stiffness;
             let direction : vec3<f32> = normalize(v2.position - v1.position);
             
             let correctionVector : vec3<f32> = correction * direction;

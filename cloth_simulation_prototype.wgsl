@@ -121,7 +121,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 
             let currentLength : f32 = distance(v1.position, v2.position);
             let deltaLength : f32 = currentLength - restLength;
-            let correction : f32 = (deltaLength / restLength) * 0.5 * stiffness;
+            let correction : f32 = (deltaLength / currentLength) * 0.5 * stiffness;
             let direction : vec3<f32> = normalize(v2.position - v1.position) * currentLength;
             
             let correctionVector : vec3<f32> = correction * direction;
